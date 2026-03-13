@@ -1,8 +1,8 @@
 import axios from 'axios';
-import Constants from 'expo-constants';
 import { Producto, Flujo, Calculo, Cotizacion, Cliente } from '../types/types';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+// Leer la URL del backend desde las variables de entorno de Expo
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://calc-movil.preview.emergentagent.com';
 
 const api = axios.create({
   baseURL: `${BACKEND_URL}/api`,
