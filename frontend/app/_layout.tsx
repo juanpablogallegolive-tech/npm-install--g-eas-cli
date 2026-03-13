@@ -37,7 +37,7 @@ export default function TabLayout() {
           options={{
             title: 'Flujos',
             tabBarIcon: ({ color, size }) => (
-              <MaterialCommunityIcons name="flow-chart" size={size} color={color} />
+              <MaterialCommunityIcons name="sitemap" size={size} color={color} />
             ),
           }}
         />
