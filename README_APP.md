@@ -1,16 +1,17 @@
 # 📱 Calculadora de Precios Móvil
 
-Aplicación móvil completa para calcular precios de productos con flujos de cálculo personalizables, múltiples clientes y gestión de cotizaciones.
+Aplicación móvil completa para calcular precios de productos con flujos de cálculo personalizables, múltiples clientes y gestión de cotizaciones. **Ahora con funcionalidad de importar/exportar datos entre dispositivos.**
 
 ## 🎯 Características Principales
 
-### ✅ **5 Pestañas Funcionales**
+### ✅ **6 Pestañas Funcionales**
 
 1. **📊 Calculadora** - Cálculo de precios con flujos personalizados
 2. **⚙️ Flujos** - Gestión de operaciones matemáticas
 3. **📦 Productos** - Catálogo de 4,349 productos
 4. **📜 Historial** - Registro de todos los cálculos
 5. **🧾 Cotizaciones** - Generación de presupuestos
+6. **🔄 Importar/Exportar** - Comparte datos entre dispositivos ⭐ NUEVO
 
 ### ✅ **Funcionalidades Completas**
 
