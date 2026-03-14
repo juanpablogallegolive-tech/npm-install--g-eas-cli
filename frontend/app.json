@@ -8,6 +8,7 @@
     "scheme": "calculadora-precios",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "description": "Aplicación profesional para calcular precios con flujos personalizados, gestión de productos y cotizaciones. Incluye importación/exportación de datos.",
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
