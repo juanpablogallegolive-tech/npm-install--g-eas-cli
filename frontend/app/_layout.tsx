@@ -69,6 +69,15 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
+          name="import-export"
+          options={{
+            title: 'Importar/Exportar',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons name="file-export" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="index"
           options={{
             href: null,
