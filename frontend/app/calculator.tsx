@@ -55,6 +55,21 @@ export default function CalculatorScreen() {
     }, [])
   );
 
+  // Actualizar el flujo seleccionado cuando cambien los flujos
+  useEffect(() => {
+    if (selectedFlujo && flujos.length > 0) {
+      const flujoActualizado = flujos.find(f => f._id === selectedFlujo._id);
+      if (flujoActualizado) {
+        // Verificar si las operaciones cambiaron
+        const operacionesCambiaron = JSON.stringify(flujoActualizado.operaciones) !== JSON.stringify(selectedFlujo.operaciones);
+        if (operacionesCambiaron) {
+          setSelectedFlujo(flujoActualizado);
+          initOperaciones(flujoActualizado);
+        }
+      }
+    }
+  }, [flujos]);
+
   const loadFlujos = async () => {
     try {
       const response = await flujosApi.getAll();
