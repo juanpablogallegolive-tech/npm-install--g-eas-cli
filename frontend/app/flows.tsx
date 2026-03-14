@@ -404,12 +404,12 @@ export default function FlowsScreen() {
                     )}
                   </TouchableOpacity>
                 )}
-                ListEmptyComponent=(
+                ListEmptyComponent={
                   <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>No hay flujos creados</Text>
                     <Text style={styles.emptySubText}>Presiona Nuevo para crear uno</Text>
                   </View>
-                )
+                }
               />
             )}
           </View>
