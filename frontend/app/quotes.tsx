@@ -229,15 +229,18 @@ export default function QuotesScreen() {
 
                 {showResults && searchingIndex === index && searchResults.length > 0 && (
                   <View style={styles.resultsContainer}>
-                    {searchResults.slice(0, 5).map((producto) => (
-                      <List.Item
-                        key={producto._id}
-                        title={producto.nombre}
-                        description={`$${producto.costo_base.toLocaleString()}`}
-                        onPress={() => seleccionarProducto(index, producto)}
-                        style={styles.resultItem}
-                      />
-                    ))}
+                    <ScrollView style={styles.resultsScroll} nestedScrollEnabled>
+                      {searchResults.slice(0, 10).map((producto) => (
+                        <TouchableOpacity
+                          key={producto._id}
+                          onPress={() => seleccionarProducto(index, producto)}
+                          style={styles.resultItem}
+                        >
+                          <Text style={styles.resultTitle}>{producto.nombre}</Text>
+                          <Text style={styles.resultPrice}>${producto.costo_base.toLocaleString()}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
                   </View>
                 )}
 
