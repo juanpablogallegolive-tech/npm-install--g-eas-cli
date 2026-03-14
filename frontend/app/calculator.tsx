@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -6,6 +6,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  TouchableOpacity,
+  Modal,
+  FlatList,
+  Keyboard,
 } from 'react-native';
 import {
   Text,
@@ -13,11 +17,10 @@ import {
   Button,
   Searchbar,
   List,
-  Divider,
   IconButton,
   ActivityIndicator,
-  Menu,
   Card,
+  Divider,
 } from 'react-native-paper';
 import { productosApi, flujosApi, calcularPrecio, calculosApi } from '../services/api';
 import { Producto, Flujo, Cliente } from '../types/types';
@@ -30,7 +33,7 @@ export default function CalculatorScreen() {
   
   const [flujos, setFlujos] = useState<Flujo[]>([]);
   const [selectedFlujo, setSelectedFlujo] = useState<Flujo | null>(null);
-  const [menuVisible, setMenuVisible] = useState(false);
+  const [modalFlujoVisible, setModalFlujoVisible] = useState(false);
   
   const [valoresOperaciones, setValoresOperaciones] = useState<Record<string, string>>({});
   const [clientes, setClientes] = useState<Array<{
@@ -42,6 +45,7 @@ export default function CalculatorScreen() {
   
   const [loading, setLoading] = useState(false);
   const [calculando, setCalculando] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadFlujos();
@@ -51,9 +55,23 @@ export default function CalculatorScreen() {
     try {
       const response = await flujosApi.getAll();
       setFlujos(response.data);
+      if (response.data.length > 0 && !selectedFlujo) {
+        // Seleccionar el primer flujo por defecto
+        setSelectedFlujo(response.data[0]);
+        initOperaciones(response.data[0]);
+      }
     } catch (error) {
       console.error('Error al cargar flujos:', error);
+      Alert.alert('Error', 'No se pudieron cargar los flujos');
     }
+  };
+
+  const initOperaciones = (flujo: Flujo) => {
+    const valores: Record<string, string> = {};
+    flujo.operaciones.forEach(op => {
+      valores[op.nombre] = '0';
+    });
+    setValoresOperaciones(valores);
   };
 
   const handleSearch = async (query: string) => {
@@ -66,6 +84,7 @@ export default function CalculatorScreen() {
         setShowResults(true);
       } catch (error) {
         console.error('Error en búsqueda:', error);
+        Alert.alert('Error', 'No se pudo realizar la búsqueda');
       } finally {
         setLoading(false);
       }
@@ -79,48 +98,53 @@ export default function CalculatorScreen() {
     setSelectedProduct(producto);
     setSearchQuery(producto.nombre);
     setShowResults(false);
+    Keyboard.dismiss();
     
     // Si el producto tiene un flujo, cargarlo
     if (producto.flujo_id) {
       const flujo = flujos.find(f => f._id === producto.flujo_id);
       if (flujo) {
         setSelectedFlujo(flujo);
-        // Inicializar valores de operaciones en 0
-        const valores: Record<string, string> = {};
-        flujo.operaciones.forEach(op => {
-          valores[op.nombre] = '0';
-        });
-        setValoresOperaciones(valores);
+        initOperaciones(flujo);
       }
     }
   };
 
   const selectFlujo = (flujo: Flujo) => {
     setSelectedFlujo(flujo);
-    setMenuVisible(false);
-    
-    // Inicializar valores de operaciones
-    const valores: Record<string, string> = {};
-    flujo.operaciones.forEach(op => {
-      valores[op.nombre] = '0';
-    });
-    setValoresOperaciones(valores);
-    
-    // Limpiar clientes
+    setModalFlujoVisible(false);
+    initOperaciones(flujo);
     setClientes([]);
   };
 
   const addCliente = () => {
-    setClientes([...clientes, {
-      nombre: '',
+    const newClientes = [...clientes, {
+      nombre: `Cliente ${clientes.length + 1}`,
       porcentaje_ganancia: '0',
       comentario: '',
       precio_final: 0,
-    }]);
+    }];
+    setClientes(newClientes);
+    
+    // Scroll al final después de agregar
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   };
 
   const removeCliente = (index: number) => {
-    setClientes(clientes.filter((_, i) => i !== index));
+    Alert.alert(
+      'Confirmar',
+      '¿Eliminar este cliente?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: () => setClientes(clientes.filter((_, i) => i !== index))
+        },
+      ]
+    );
   };
 
   const updateCliente = (index: number, field: string, value: string) => {
@@ -130,8 +154,13 @@ export default function CalculatorScreen() {
   };
 
   const calcular = async () => {
-    if (!selectedProduct || !selectedFlujo) {
-      Alert.alert('Error', 'Selecciona un producto y un flujo');
+    if (!selectedProduct) {
+      Alert.alert('Error', 'Selecciona un producto primero');
+      return;
+    }
+    
+    if (!selectedFlujo) {
+      Alert.alert('Error', 'Selecciona un flujo de cálculo');
       return;
     }
 
@@ -140,10 +169,16 @@ export default function CalculatorScreen() {
       return;
     }
 
+    // Validar que los clientes tengan nombre
+    const clientesSinNombre = clientes.filter(c => !c.nombre.trim());
+    if (clientesSinNombre.length > 0) {
+      Alert.alert('Error', 'Todos los clientes deben tener un nombre');
+      return;
+    }
+
     try {
       setCalculando(true);
       
-      // Convertir valores a números
       const valoresNum: Record<string, number> = {};
       Object.keys(valoresOperaciones).forEach(key => {
         valoresNum[key] = parseFloat(valoresOperaciones[key]) || 0;
@@ -170,10 +205,12 @@ export default function CalculatorScreen() {
         }
       });
       setClientes(newClientes);
+      
+      Alert.alert('Éxito', 'Precios calculados correctamente');
 
     } catch (error) {
       console.error('Error al calcular:', error);
-      Alert.alert('Error', 'No se pudo calcular el precio');
+      Alert.alert('Error', 'No se pudo calcular el precio. Verifica los datos ingresados.');
     } finally {
       setCalculando(false);
     }
@@ -182,6 +219,11 @@ export default function CalculatorScreen() {
   const guardar = async () => {
     if (!selectedProduct || !selectedFlujo || clientes.length === 0) {
       Alert.alert('Error', 'Completa todos los campos antes de guardar');
+      return;
+    }
+
+    if (clientes[0]?.precio_final === 0) {
+      Alert.alert('Error', 'Calcula los precios antes de guardar');
       return;
     }
 
@@ -210,6 +252,13 @@ export default function CalculatorScreen() {
       });
 
       Alert.alert('Éxito', 'Cálculo guardado en el historial');
+      
+      // Limpiar formulario
+      setSelectedProduct(null);
+      setSearchQuery('');
+      setClientes([]);
+      setValoresOperaciones({});
+      
     } catch (error) {
       console.error('Error al guardar:', error);
       Alert.alert('Error', 'No se pudo guardar el cálculo');
@@ -222,8 +271,13 @@ export default function CalculatorScreen() {
     <KeyboardAvoidingView 
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={100}
     >
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.scrollView}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Búsqueda de Producto */}
         <Card style={styles.card}>
           <Card.Content>
@@ -237,15 +291,18 @@ export default function CalculatorScreen() {
             {loading && <ActivityIndicator style={styles.loader} />}
             {showResults && searchResults.length > 0 && (
               <View style={styles.resultsContainer}>
-                {searchResults.map((producto) => (
-                  <List.Item
-                    key={producto._id}
-                    title={producto.nombre}
-                    description={`$${producto.costo_base.toLocaleString()}`}
-                    onPress={() => selectProduct(producto)}
-                    style={styles.resultItem}
-                  />
-                ))}
+                <ScrollView style={styles.resultsScroll} nestedScrollEnabled>
+                  {searchResults.map((producto) => (
+                    <TouchableOpacity
+                      key={producto._id}
+                      onPress={() => selectProduct(producto)}
+                      style={styles.resultItem}
+                    >
+                      <Text style={styles.resultTitle}>{producto.nombre}</Text>
+                      <Text style={styles.resultPrice}>${producto.costo_base.toLocaleString()}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
               </View>
             )}
           </Card.Content>
@@ -255,27 +312,15 @@ export default function CalculatorScreen() {
         <Card style={styles.card}>
           <Card.Content>
             <Text style={styles.sectionTitle}>Flujo de Cálculo</Text>
-            <Menu
-              visible={menuVisible}
-              onDismiss={() => setMenuVisible(false)}
-              anchor={
-                <Button
-                  mode="outlined"
-                  onPress={() => setMenuVisible(true)}
-                  icon="chevron-down"
-                >
-                  {selectedFlujo ? selectedFlujo.nombre : 'Seleccionar flujo'}
-                </Button>
-              }
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => setModalFlujoVisible(true)}
             >
-              {flujos.map((flujo) => (
-                <Menu.Item
-                  key={flujo._id}
-                  onPress={() => selectFlujo(flujo)}
-                  title={flujo.nombre}
-                />
-              ))}
-            </Menu>
+              <Text style={styles.dropdownText}>
+                {selectedFlujo ? selectedFlujo.nombre : 'Seleccionar flujo'}
+              </Text>
+              <IconButton icon="chevron-down" size={20} style={styles.dropdownIcon} />
+            </TouchableOpacity>
           </Card.Content>
         </Card>
 
@@ -284,10 +329,13 @@ export default function CalculatorScreen() {
           <Card style={styles.card}>
             <Card.Content>
               <Text style={styles.sectionTitle}>Valores de Operaciones</Text>
-              {selectedFlujo.operaciones.map((operacion) => (
-                <View key={operacion.nombre} style={styles.inputRow}>
+              {selectedFlujo.operaciones.map((operacion, index) => (
+                <View key={`${operacion.nombre}-${index}`} style={styles.inputRow}>
                   <Text style={styles.inputLabel}>
-                    {operacion.nombre} ({operacion.tipo_operacion} - {operacion.tipo_valor})
+                    {operacion.nombre}
+                  </Text>
+                  <Text style={styles.inputSubLabel}>
+                    {operacion.tipo_operacion} - {operacion.tipo_valor}
                   </Text>
                   <TextInput
                     mode="outlined"
@@ -298,6 +346,7 @@ export default function CalculatorScreen() {
                       [operacion.nombre]: text,
                     })}
                     style={styles.input}
+                    dense
                   />
                 </View>
               ))}
@@ -310,8 +359,19 @@ export default function CalculatorScreen() {
           <Card.Content>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Clientes</Text>
-              <IconButton icon="plus" size={24} onPress={addCliente} />
+              <Button 
+                mode="contained" 
+                onPress={addCliente}
+                icon="plus"
+                compact
+              >
+                Agregar
+              </Button>
             </View>
+            
+            {clientes.length === 0 && (
+              <Text style={styles.emptyText}>No hay clientes. Presiona Agregar para comenzar.</Text>
+            )}
             
             {clientes.map((cliente, index) => (
               <View key={index} style={styles.clienteCard}>
@@ -326,10 +386,11 @@ export default function CalculatorScreen() {
                 
                 <TextInput
                   mode="outlined"
-                  label="Nombre"
+                  label="Nombre *"
                   value={cliente.nombre}
                   onChangeText={(text) => updateCliente(index, 'nombre', text)}
                   style={styles.inputSmall}
+                  dense
                 />
                 
                 <TextInput
@@ -339,6 +400,7 @@ export default function CalculatorScreen() {
                   value={cliente.porcentaje_ganancia}
                   onChangeText={(text) => updateCliente(index, 'porcentaje_ganancia', text)}
                   style={styles.inputSmall}
+                  dense
                 />
                 
                 <TextInput
@@ -348,13 +410,15 @@ export default function CalculatorScreen() {
                   onChangeText={(text) => updateCliente(index, 'comentario', text)}
                   style={styles.inputSmall}
                   multiline
+                  numberOfLines={2}
+                  dense
                 />
                 
                 {cliente.precio_final > 0 && (
                   <View style={styles.resultadoBox}>
                     <Text style={styles.resultadoLabel}>Precio Final:</Text>
                     <Text style={styles.resultadoValor}>
-                      ${cliente.precio_final.toLocaleString()}
+                      ${cliente.precio_final.toLocaleString('es-CO')}
                     </Text>
                   </View>
                 )}
@@ -369,8 +433,9 @@ export default function CalculatorScreen() {
             mode="contained"
             onPress={calcular}
             loading={calculando}
-            disabled={!selectedProduct || !selectedFlujo || clientes.length === 0}
+            disabled={!selectedProduct || !selectedFlujo || clientes.length === 0 || calculando}
             style={styles.button}
+            icon="calculator"
           >
             Calcular
           </Button>
@@ -379,13 +444,67 @@ export default function CalculatorScreen() {
             mode="contained"
             onPress={guardar}
             loading={loading}
-            disabled={clientes.length === 0 || !clientes[0]?.precio_final}
+            disabled={clientes.length === 0 || !clientes[0]?.precio_final || loading}
             style={styles.button}
+            icon="content-save"
           >
-            Guardar
+            Guardar en Historial
           </Button>
         </View>
+
+        <View style={styles.bottomSpace} />
       </ScrollView>
+
+      {/* Modal para seleccionar flujo */}
+      <Modal
+        visible={modalFlujoVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalFlujoVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Seleccionar Flujo</Text>
+              <IconButton
+                icon="close"
+                size={24}
+                onPress={() => setModalFlujoVisible(false)}
+              />
+            </View>
+            <Divider />
+            <FlatList
+              data={flujos}
+              keyExtractor={(item) => item._id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.modalItem,
+                    selectedFlujo?._id === item._id && styles.modalItemSelected
+                  ]}
+                  onPress={() => selectFlujo(item)}
+                >
+                  <Text style={[
+                    styles.modalItemText,
+                    selectedFlujo?._id === item._id && styles.modalItemTextSelected
+                  ]}>
+                    {item.nombre}
+                  </Text>
+                  {selectedFlujo?._id === item._id && (
+                    <IconButton icon="check" size={20} />
+                  )}
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent=(
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>No hay flujos creados.</Text>
+                  <Text style={styles.emptySubText}>Ve a la pestaña Flujos para crear uno.</Text>
+                </View>
+              )
+            />
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -401,19 +520,23 @@ const styles = StyleSheet.create({
   card: {
     margin: 16,
     marginBottom: 8,
+    elevation: 2,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 12,
+    color: '#333',
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
   },
   searchbar: {
     marginBottom: 8,
+    elevation: 0,
   },
   loader: {
     marginVertical: 8,
@@ -421,19 +544,62 @@ const styles = StyleSheet.create({
   resultsContainer: {
     maxHeight: 200,
     backgroundColor: '#fff',
-    borderRadius: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginTop: 8,
+  },
+  resultsScroll: {
+    maxHeight: 200,
   },
   resultItem: {
+    padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#f0f0f0',
+  },
+  resultTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+  },
+  resultPrice: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  dropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 48,
+  },
+  dropdownText: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  dropdownIcon: {
+    margin: 0,
   },
   inputRow: {
-    marginBottom: 12,
+    marginBottom: 16,
   },
   inputLabel: {
-    fontSize: 14,
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 2,
+    color: '#333',
+  },
+  inputSubLabel: {
+    fontSize: 12,
     color: '#666',
+    marginBottom: 6,
   },
   input: {
     backgroundColor: '#fff',
@@ -447,6 +613,8 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
   clienteHeader: {
     flexDirection: 'row',
@@ -457,6 +625,7 @@ const styles = StyleSheet.create({
   clienteTitle: {
     fontSize: 16,
     fontWeight: 'bold',
+    color: '#6200ee',
   },
   resultadoBox: {
     backgroundColor: '#e8f5e9',
@@ -470,17 +639,83 @@ const styles = StyleSheet.create({
   resultadoLabel: {
     fontSize: 14,
     color: '#2e7d32',
+    fontWeight: '500',
   },
   resultadoValor: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1b5e20',
   },
+  emptyText: {
+    textAlign: 'center',
+    color: '#999',
+    paddingVertical: 16,
+    fontSize: 14,
+  },
+  emptySubText: {
+    textAlign: 'center',
+    color: '#aaa',
+    fontSize: 12,
+    marginTop: 4,
+  },
   buttonContainer: {
     padding: 16,
     gap: 12,
   },
   button: {
-    paddingVertical: 8,
+    paddingVertical: 6,
+  },
+  bottomSpace: {
+    height: 32,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  modalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalItemSelected: {
+    backgroundColor: '#f0e6ff',
+  },
+  modalItemText: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  modalItemTextSelected: {
+    color: '#6200ee',
+    fontWeight: '500',
+  },
+  emptyContainer: {
+    padding: 32,
+    alignItems: 'center',
   },
 });
