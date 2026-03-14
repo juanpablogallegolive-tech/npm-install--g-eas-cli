@@ -48,9 +48,12 @@ export default function CalculatorScreen() {
   const [calculando, setCalculando] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  useEffect(() => {
-    loadFlujos();
-  }, []);
+  // Recargar flujos cada vez que la pantalla recibe foco
+  useFocusEffect(
+    React.useCallback(() => {
+      loadFlujos();
+    }, [])
+  );
 
   const loadFlujos = async () => {
     try {
