@@ -2,27 +2,27 @@
 
 ## 🎯 EMPIEZA AQUÍ
 
-### 1. **RESUMEN_CONFIGURACION.md** 👈 LEE ESTO PRIMERO
+### ⚠️ **INSTRUCCIONES_REALES.md** 👈 👈 👈 LEE ESTO PRIMERO
+   - **Cómo REALMENTE descargar tu código desde Emergent**
+   - Opciones reales que SÍ funcionan
+   - Paso a paso verificado y funcional
+   - Sin comandos falsos ni botones inexistentes
+
+### 1. **RESUMEN_CONFIGURACION.md**
    - Resumen ejecutivo de TODO lo configurado
    - Lo que está listo y lo que debes hacer
    - Opciones rápidas para probar la app
 
-### 2. **INSTRUCCIONES_DESCARGA.md** 👈 LUEGO ESTO
-   - Cómo guardar el proyecto desde Emergent
-   - Pasos para descargar a tu computadora
-   - Dos opciones: Expo Go (rápido) o APK (completo)
+### 2. **CHECKLIST_LANZAMIENTO.md**
+   - Pasos completos para publicar en Play Store
+   - Información para la ficha de la tienda
+   - Screenshots necesarios
+   - Checklist final
 
-### 3. **README_APK.md** (Guía Técnica Completa)
-   - Comandos detallados para generar APK
-   - Configuración de EAS Build
-   - Solución de problemas
-   - Publicación en Play Store/App Store
-
-### 4. **README_APP.md** (Documentación de la App)
-   - Características completas de la aplicación
-   - Cómo usar cada pestaña
-   - Arquitectura técnica
-   - Ejemplos de uso
+### 3. **RELEASE_NOTES.md**
+   - Todas las características implementadas
+   - Changelog completo versión 1.0.0
+   - Tecnologías utilizadas
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### ¿Qué tengo?
 ✅ Una aplicación móvil COMPLETA y FUNCIONAL
-✅ 5 pestañas: Calculadora, Flujos, Productos, Historial, Cotizaciones
+✅ 6 pestañas: Calculadora, Flujos, Productos, Historial, Cotizaciones, Importar/Exportar
 ✅ 4,349 productos pre-cargados
 ✅ Backend API funcionando
 ✅ Base de datos MongoDB operativa
@@ -42,12 +42,14 @@ Para **probar ahora** (2 minutos):
 1. Descargar Expo Go en tu celular
 2. Escanear QR en: https://calc-movil.preview.emergentagent.com
 
-Para **instalar sin Expo Go** (30 minutos):
-1. Guardar proyecto desde Emergent
-2. Instalar Node.js en tu PC
-3. Ejecutar 5 comandos
-4. Esperar 10-15 min
-5. Instalar APK
+Para **generar APK** (30-45 minutos):
+1. **Lee INSTRUCCIONES_REALES.md** 👈 IMPORTANTE
+2. Conecta GitHub en Emergent
+3. Usa "Save to GitHub"
+4. Clona en tu PC
+5. Instala Node.js
+6. Ejecuta comandos de EAS Build
+7. Descarga e instala APK
 
 ---
 
