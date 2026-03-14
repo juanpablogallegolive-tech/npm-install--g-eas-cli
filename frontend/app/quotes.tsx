@@ -403,14 +403,30 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   resultsContainer: {
-    maxHeight: 150,
+    maxHeight: 200,
     backgroundColor: '#fff',
-    borderRadius: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
     marginBottom: 8,
   },
+  resultsScroll: {
+    maxHeight: 200,
+  },
   resultItem: {
+    padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#f0f0f0',
+  },
+  resultTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+  },
+  resultPrice: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   subtotalBox: {
     backgroundColor: '#e3f2fd',
