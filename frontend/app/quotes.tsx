@@ -5,6 +5,8 @@ import {
   StyleSheet,
   Alert,
   FlatList,
+  TouchableOpacity,
+  Keyboard,
 } from 'react-native';
 import {
   Text,
