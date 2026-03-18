@@ -1,8 +1,12 @@
 import axios from 'axios';
 import { Producto, Flujo, Calculo, Cotizacion, Cliente } from '../types/types';
 
-// Leer la URL del backend desde las variables de entorno de Expo
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://calc-movil.preview.emergentagent.com';
+// CORREGIDO: Sin fallback hardcodeado
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+if (!BACKEND_URL) {
+  throw new Error('EXPO_PUBLIC_BACKEND_URL no está configurado');
+}
 
 const api = axios.create({
   baseURL: `${BACKEND_URL}/api`,

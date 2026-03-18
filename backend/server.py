@@ -7,8 +7,6 @@ from pymongo import MongoClient
 from bson import ObjectId
 import os
 from dotenv import load_dotenv
-import openpyxl
-import io
 
 load_dotenv()
 
@@ -23,10 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MongoDB
+# MongoDB - CORREGIDO: Lee DB_NAME del environment
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 client = MongoClient(MONGO_URL)
-db = client["calculadora_precios"]
+DB_NAME = os.getenv("DB_NAME", "calculadora_precios")
+db = client[DB_NAME]
 
 # Colecciones
 productos_col = db["productos"]
@@ -53,8 +52,8 @@ class PyObjectId(ObjectId):
 
 class Operacion(BaseModel):
     nombre: str
-    tipo_operacion: str  # Sumar, Restar, Multiplicar, Dividir
-    tipo_valor: str  # Porcentaje, Número
+    tipo_operacion: str
+    tipo_valor: str
     orden: int
 
 class Flujo(BaseModel):
@@ -131,13 +130,11 @@ class CalcularPrecioRequest(BaseModel):
 # ==================== HELPERS ====================
 
 def serialize_doc(doc):
-    """Convierte ObjectId a string"""
     if doc and "_id" in doc:
         doc["_id"] = str(doc["_id"])
     return doc
 
 def aplicar_operacion(precio_base: float, operacion: dict, valor: float) -> float:
-    """Aplica una operación al precio"""
     tipo_op = operacion["tipo_operacion"]
     tipo_val = operacion["tipo_valor"]
     
@@ -150,7 +147,7 @@ def aplicar_operacion(precio_base: float, operacion: dict, valor: float) -> floa
             return precio_base * (valor / 100)
         elif tipo_op == "Dividir":
             return precio_base / (valor / 100) if valor != 0 else precio_base
-    else:  # Número
+    else:
         if tipo_op == "Sumar":
             return precio_base + valor
         elif tipo_op == "Restar":
@@ -171,7 +168,6 @@ def get_productos(skip: int = 0, limit: int = 100):
 
 @app.get("/api/productos/buscar")
 def buscar_productos(q: str):
-    """Búsqueda con autocompletado"""
     regex = {"$regex": q, "$options": "i"}
     productos = list(productos_col.find({"nombre": regex}).limit(20))
     return [serialize_doc(p) for p in productos]
@@ -334,13 +330,10 @@ def eliminar_cotizacion(cotizacion_id: str):
 
 @app.post("/api/calcular")
 def calcular_precio(request: CalcularPrecioRequest):
-    """Calcula el precio aplicando flujo y ganancias por cliente"""
-    # Obtener flujo
     flujo = flujos_col.find_one({"_id": ObjectId(request.flujo_id)})
     if not flujo:
         raise HTTPException(status_code=404, detail="Flujo no encontrado")
     
-    # Calcular costo base aplicando operaciones del flujo
     precio_actual = request.costo_base
     operaciones = sorted(flujo.get("operaciones", []), key=lambda x: x["orden"])
     
@@ -349,7 +342,6 @@ def calcular_precio(request: CalcularPrecioRequest):
         valor = request.valores_operaciones.get(nombre_op, 0)
         precio_actual = aplicar_operacion(precio_actual, operacion, valor)
     
-    # Calcular precio final para cada cliente con su ganancia
     resultados = []
     for cliente in request.clientes:
         precio_con_ganancia = precio_actual
@@ -370,51 +362,11 @@ def calcular_precio(request: CalcularPrecioRequest):
         "resultados": resultados
     }
 
-# ==================== ENDPOINT IMPORTAR ====================
-
-@app.post("/api/importar-productos")
-async def importar_productos(file: UploadFile = File(...)):
-    """Importa productos desde Excel"""
-    try:
-        contents = await file.read()
-        wb = openpyxl.load_workbook(io.BytesIO(contents))
-        ws = wb.active
-        
-        productos_importados = 0
-        
-        for row in ws.iter_rows(values_only=True):
-            if row[0] and row[1]:  # nombre y precio
-                nombre = str(row[0]).strip()
-                try:
-                    precio = float(row[1])
-                    
-                    # Verificar si ya existe
-                    existe = productos_col.find_one({"nombre": nombre})
-                    if not existe:
-                        productos_col.insert_one({
-                            "nombre": nombre,
-                            "costo_original": precio,
-                            "costo_base": precio,
-                            "flujo_id": None,
-                            "comentarios": "",
-                            "fecha_creacion": datetime.now()
-                        })
-                        productos_importados += 1
-                except ValueError:
-                    continue
-        
-        return {
-            "message": f"Importación completada",
-            "productos_importados": productos_importados
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error al importar: {str(e)}")
-
 # ==================== HEALTH CHECK ====================
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "database": "connected"}
+    return {"status": "ok", "database": DB_NAME}
 
 if __name__ == "__main__":
     import uvicorn
