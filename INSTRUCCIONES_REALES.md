@@ -155,7 +155,7 @@ No necesitas descargar nada. Usa la app YA:
    - iOS: https://apps.apple.com/app/expo-go/id982107779
 
 2. **Abre en tu celular:**
-   - Navega a: https://calc-movil.preview.emergentagent.com
+   - Navega a: https://calc-mobile-app-1.preview.emergentagent.com
    - Escanea el código QR que aparece
    - La app se abrirá en Expo Go
 

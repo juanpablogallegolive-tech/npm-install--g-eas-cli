@@ -22,7 +22,7 @@ Ya configuré tu aplicación con:
 
 2. Abre el navegador en tu celular y ve a:
    ```
-   https://calc-movil.preview.emergentagent.com
+   https://calc-mobile-app-1.preview.emergentagent.com
    ```
 
 3. Escanea el código QR que aparece

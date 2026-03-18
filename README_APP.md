@@ -198,9 +198,9 @@ La aplicación viene pre-cargada con:
 
 ## 🌐 URLs de Acceso
 
-- **Frontend Web**: https://calc-movil.preview.emergentagent.com
-- **Backend API**: https://calc-movil.preview.emergentagent.com/api
-- **Health Check**: https://calc-movil.preview.emergentagent.com/api/health
+- **Frontend Web**: https://calc-mobile-app-1.preview.emergentagent.com
+- **Backend API**: https://calc-mobile-app-1.preview.emergentagent.com/api
+- **Health Check**: https://calc-mobile-app-1.preview.emergentagent.com/api/health
 
 ## 📱 Expo QR Code
 

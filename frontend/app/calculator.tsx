@@ -10,29 +10,30 @@ import {
   Modal,
   FlatList,
   Keyboard,
-  AppState,
 } from 'react-native';
 import {
   Text,
   TextInput,
   Button,
   Searchbar,
-  List,
   IconButton,
   ActivityIndicator,
   Card,
   Divider,
 } from 'react-native-paper';
-import { productosApi, flujosApi, calcularPrecio, calculosApi } from '../services/api';
+import { productosApi, calcularPrecio, calculosApi } from '../services/api';
 import { Producto, Flujo, Cliente } from '../types/types';
+import { useStore } from '../store/store';
 
 export default function CalculatorScreen() {
+  // Global state from Zustand - this will auto-update when flujos change
+  const { flujos, fetchFlujos, flujosVersion } = useStore();
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Producto[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   
-  const [flujos, setFlujos] = useState<Flujo[]>([]);
   const [selectedFlujo, setSelectedFlujo] = useState<Flujo | null>(null);
   const [modalFlujoVisible, setModalFlujoVisible] = useState(false);
   
@@ -47,55 +48,43 @@ export default function CalculatorScreen() {
   const [loading, setLoading] = useState(false);
   const [calculando, setCalculando] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
-  const appState = useRef(AppState.currentState);
 
-  // Cargar flujos al inicio
+  // Load flujos on mount
   useEffect(() => {
-    loadFlujos();
+    fetchFlujos();
   }, []);
 
-  // Recargar flujos cuando la app vuelve a estar activa
+  // Auto-select first flujo when flujos load and none selected
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        loadFlujos();
-      }
-      appState.current = nextAppState;
-    });
+    if (flujos.length > 0 && !selectedFlujo) {
+      setSelectedFlujo(flujos[0]);
+      initOperaciones(flujos[0]);
+    }
+  }, [flujos]);
 
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
-  // Actualizar el flujo seleccionado cuando cambien los flujos
+  // Update selected flujo when global flujos change (sync with Flows tab)
   useEffect(() => {
     if (selectedFlujo && flujos.length > 0) {
       const flujoActualizado = flujos.find(f => f._id === selectedFlujo._id);
       if (flujoActualizado) {
+        // Check if operations changed
         const operacionesCambiaron = JSON.stringify(flujoActualizado.operaciones) !== JSON.stringify(selectedFlujo.operaciones);
         if (operacionesCambiaron) {
           setSelectedFlujo(flujoActualizado);
           initOperaciones(flujoActualizado);
         }
+      } else {
+        // Flujo was deleted, select first available
+        if (flujos.length > 0) {
+          setSelectedFlujo(flujos[0]);
+          initOperaciones(flujos[0]);
+        } else {
+          setSelectedFlujo(null);
+          setValoresOperaciones({});
+        }
       }
     }
-  }, [flujos]);
-
-  const loadFlujos = async () => {
-    try {
-      const response = await flujosApi.getAll();
-      setFlujos(response.data);
-      if (response.data.length > 0 && !selectedFlujo) {
-        // Seleccionar el primer flujo por defecto
-        setSelectedFlujo(response.data[0]);
-        initOperaciones(response.data[0]);
-      }
-    } catch (error) {
-      console.error('Error al cargar flujos:', error);
-      Alert.alert('Error', 'No se pudieron cargar los flujos');
-    }
-  };
+  }, [flujos, flujosVersion]);
 
   const initOperaciones = (flujo: Flujo) => {
     const valores: Record<string, string> = {};
@@ -157,7 +146,6 @@ export default function CalculatorScreen() {
     }];
     setClientes(newClientes);
     
-    // Scroll al final después de agregar
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
@@ -200,7 +188,6 @@ export default function CalculatorScreen() {
       return;
     }
 
-    // Validar que los clientes tengan nombre
     const clientesSinNombre = clientes.filter(c => !c.nombre.trim());
     if (clientesSinNombre.length > 0) {
       Alert.alert('Error', 'Todos los clientes deben tener un nombre');
@@ -228,7 +215,6 @@ export default function CalculatorScreen() {
         clientes: clientesData,
       });
 
-      // Actualizar precios finales
       const newClientes = [...clientes];
       response.data.resultados.forEach((resultado, index) => {
         if (newClientes[index]) {
@@ -284,7 +270,6 @@ export default function CalculatorScreen() {
 
       Alert.alert('Éxito', 'Cálculo guardado en el historial');
       
-      // Limpiar formulario
       setSelectedProduct(null);
       setSearchQuery('');
       setClientes([]);
@@ -296,6 +281,12 @@ export default function CalculatorScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Refresh flujos from API
+  const handleRefreshFlujos = async () => {
+    await fetchFlujos();
+    Alert.alert('Actualizado', 'Lista de flujos actualizada');
   };
 
   return (
@@ -347,7 +338,7 @@ export default function CalculatorScreen() {
               <IconButton
                 icon="refresh"
                 size={20}
-                onPress={loadFlujos}
+                onPress={handleRefreshFlujos}
                 style={styles.refreshButton}
               />
             </View>
@@ -360,6 +351,9 @@ export default function CalculatorScreen() {
               </Text>
               <IconButton icon="chevron-down" size={20} style={styles.dropdownIcon} />
             </TouchableOpacity>
+            <Text style={styles.flujosCount}>
+              {flujos.length} flujo(s) disponible(s)
+            </Text>
           </Card.Content>
         </Card>
 
@@ -504,7 +498,7 @@ export default function CalculatorScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Seleccionar Flujo</Text>
+              <Text style={styles.modalTitle}>Seleccionar Flujo ({flujos.length})</Text>
               <IconButton
                 icon="close"
                 size={24}
@@ -523,12 +517,17 @@ export default function CalculatorScreen() {
                   ]}
                   onPress={() => selectFlujo(item)}
                 >
-                  <Text style={[
-                    styles.modalItemText,
-                    selectedFlujo?._id === item._id && styles.modalItemTextSelected
-                  ]}>
-                    {item.nombre}
-                  </Text>
+                  <View style={styles.modalItemContent}>
+                    <Text style={[
+                      styles.modalItemText,
+                      selectedFlujo?._id === item._id && styles.modalItemTextSelected
+                    ]}>
+                      {item.nombre}
+                    </Text>
+                    <Text style={styles.modalItemSubtext}>
+                      {item.operaciones.length} operaciones
+                    </Text>
+                  </View>
                   {selectedFlujo?._id === item._id && (
                     <IconButton icon="check" size={20} />
                   )}
@@ -628,6 +627,12 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     margin: 0,
+  },
+  flujosCount: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   inputRow: {
     marginBottom: 16,
@@ -747,14 +752,21 @@ const styles = StyleSheet.create({
   modalItemSelected: {
     backgroundColor: '#f0e6ff',
   },
+  modalItemContent: {
+    flex: 1,
+  },
   modalItemText: {
     fontSize: 16,
     color: '#333',
-    flex: 1,
   },
   modalItemTextSelected: {
     color: '#6200ee',
     fontWeight: '500',
+  },
+  modalItemSubtext: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
   },
   emptyContainer: {
     padding: 32,

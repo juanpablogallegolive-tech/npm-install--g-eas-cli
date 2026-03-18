@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -19,42 +19,43 @@ import {
 } from 'react-native-paper';
 import { flujosApi } from '../services/api';
 import { Flujo, Operacion } from '../types/types';
+import { useStore } from '../store/store';
 
 export default function FlowsScreen() {
-  const [flujos, setFlujos] = useState<Flujo[]>([]);
+  // Global state from Zustand
+  const { flujos, fetchFlujos, addFlujo, updateFlujoInStore, removeFlujo, flujosLoading } = useStore();
+  
+  // Local state
   const [selectedFlujo, setSelectedFlujo] = useState<Flujo | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   
   const [nombreFlujo, setNombreFlujo] = useState('');
   const [operaciones, setOperaciones] = useState<Operacion[]>([]);
 
+  // Load flujos on mount
   useEffect(() => {
     loadFlujos();
   }, []);
 
   const loadFlujos = async () => {
-    try {
-      setLoading(true);
-      const response = await flujosApi.getAll();
-      setFlujos(response.data);
-      if (response.data.length > 0 && !selectedFlujo) {
-        selectFlujo(response.data[0]);
-      }
-    } catch (error) {
-      console.error('Error al cargar flujos:', error);
-      Alert.alert('Error', 'No se pudieron cargar los flujos');
-    } finally {
-      setLoading(false);
-    }
+    await fetchFlujos();
   };
 
-  const selectFlujo = (flujo: Flujo) => {
+  // Auto-select first flujo when flujos change
+  useEffect(() => {
+    if (flujos.length > 0 && !selectedFlujo) {
+      selectFlujo(flujos[0]);
+    }
+  }, [flujos]);
+
+  const selectFlujo = useCallback((flujo: Flujo) => {
     setSelectedFlujo(flujo);
     setNombreFlujo(flujo.nombre);
-    setOperaciones([...flujo.operaciones]);
+    // Create a deep copy of operaciones to avoid mutation issues
+    setOperaciones(flujo.operaciones.map(op => ({ ...op })));
     setModalVisible(false);
-  };
+  }, []);
 
   const nuevoFlujo = () => {
     setSelectedFlujo(null);
@@ -78,15 +79,17 @@ export default function FlowsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              setLoading(true);
+              setSaving(true);
               await flujosApi.delete(selectedFlujo._id);
+              // Update global store
+              removeFlujo(selectedFlujo._id);
               Alert.alert('Éxito', 'Flujo eliminado');
               nuevoFlujo();
-              loadFlujos();
             } catch (error) {
+              console.error('Error al borrar flujo:', error);
               Alert.alert('Error', 'No se pudo borrar el flujo');
             } finally {
-              setLoading(false);
+              setSaving(false);
             }
           },
         },
@@ -106,52 +109,75 @@ export default function FlowsScreen() {
     }
 
     try {
-      setLoading(true);
+      setSaving(true);
       const flujoData = {
         nombre: nombreFlujo.trim(),
         operaciones: operaciones.map((op, index) => ({
-          ...op,
+          nombre: op.nombre,
+          tipo_operacion: op.tipo_operacion,
+          tipo_valor: op.tipo_valor,
           orden: index,
         })),
       };
 
       if (selectedFlujo) {
+        // Update existing flujo
         await flujosApi.update(selectedFlujo._id, flujoData);
+        
+        // Update in global store
+        const updatedFlujo: Flujo = {
+          ...selectedFlujo,
+          ...flujoData,
+          operaciones: flujoData.operaciones,
+        };
+        updateFlujoInStore(updatedFlujo);
+        setSelectedFlujo(updatedFlujo);
+        
         Alert.alert('Éxito', 'Flujo actualizado correctamente');
       } else {
-        await flujosApi.create(flujoData);
+        // Create new flujo
+        const response = await flujosApi.create(flujoData);
+        const newFlujo = response.data;
+        
+        // Add to global store
+        addFlujo(newFlujo);
+        setSelectedFlujo(newFlujo);
+        
         Alert.alert('Éxito', 'Flujo creado correctamente');
       }
-      
-      loadFlujos();
     } catch (error) {
       console.error('Error al guardar flujo:', error);
       Alert.alert('Error', 'No se pudo guardar el flujo');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const agregarOperacion = () => {
-    const nuevaOperacion: Operacion = {
-      nombre: `Operación ${operaciones.length + 1}`,
-      tipo_operacion: 'Sumar',
-      tipo_valor: 'Porcentaje',
-      orden: operaciones.length,
-    };
-    setOperaciones([...operaciones, nuevaOperacion]);
-  };
+  // FIX: Correctly add only ONE new operation - using functional update
+  const agregarOperacion = useCallback(() => {
+    setOperaciones(prevOps => {
+      const nuevaOperacion: Operacion = {
+        nombre: `Operación ${prevOps.length + 1}`,
+        tipo_operacion: 'Sumar',
+        tipo_valor: 'Porcentaje',
+        orden: prevOps.length,
+      };
+      return [...prevOps, nuevaOperacion];
+    });
+  }, []);
 
-  const actualizarOperacion = (index: number, field: keyof Operacion, value: string) => {
-    const nuevasOperaciones = [...operaciones];
-    nuevasOperaciones[index] = {
-      ...nuevasOperaciones[index],
-      [field]: value,
-    };
-    setOperaciones(nuevasOperaciones);
-  };
+  const actualizarOperacion = useCallback((index: number, field: keyof Operacion, value: string) => {
+    setOperaciones(prevOps => {
+      const nuevasOperaciones = [...prevOps];
+      nuevasOperaciones[index] = {
+        ...nuevasOperaciones[index],
+        [field]: value,
+      };
+      return nuevasOperaciones;
+    });
+  }, []);
 
-  const eliminarOperacion = (index: number) => {
+  const eliminarOperacion = useCallback((index: number) => {
     Alert.alert(
       'Confirmar',
       '¿Eliminar esta operación?',
@@ -160,40 +186,58 @@ export default function FlowsScreen() {
         {
           text: 'Eliminar',
           style: 'destructive',
-          onPress: () => setOperaciones(operaciones.filter((_, i) => i !== index))
+          onPress: () => {
+            setOperaciones(prevOps => prevOps.filter((_, i) => i !== index));
+          }
         },
       ]
     );
-  };
+  }, []);
 
-  const moverOperacion = (index: number, direccion: 'arriba' | 'abajo') => {
-    if (
-      (direccion === 'arriba' && index === 0) ||
-      (direccion === 'abajo' && index === operaciones.length - 1)
-    ) {
-      return;
-    }
+  const moverOperacion = useCallback((index: number, direccion: 'arriba' | 'abajo') => {
+    setOperaciones(prevOps => {
+      if (
+        (direccion === 'arriba' && index === 0) ||
+        (direccion === 'abajo' && index === prevOps.length - 1)
+      ) {
+        return prevOps;
+      }
 
-    const nuevasOperaciones = [...operaciones];
-    const newIndex = direccion === 'arriba' ? index - 1 : index + 1;
-    [nuevasOperaciones[index], nuevasOperaciones[newIndex]] = [
-      nuevasOperaciones[newIndex],
-      nuevasOperaciones[index],
-    ];
-    setOperaciones(nuevasOperaciones);
-  };
+      const nuevasOperaciones = [...prevOps];
+      const newIndex = direccion === 'arriba' ? index - 1 : index + 1;
+      [nuevasOperaciones[index], nuevasOperaciones[newIndex]] = [
+        nuevasOperaciones[newIndex],
+        nuevasOperaciones[index],
+      ];
+      return nuevasOperaciones;
+    });
+  }, []);
 
-  const ciclaTipoOperacion = (index: number) => {
+  const ciclaTipoOperacion = useCallback((index: number) => {
     const tipos: Array<Operacion['tipo_operacion']> = ['Sumar', 'Restar', 'Multiplicar', 'Dividir'];
-    const currentIndex = tipos.indexOf(operaciones[index].tipo_operacion);
-    const nextIndex = (currentIndex + 1) % tipos.length;
-    actualizarOperacion(index, 'tipo_operacion', tipos[nextIndex]);
-  };
+    setOperaciones(prevOps => {
+      const nuevasOperaciones = [...prevOps];
+      const currentIndex = tipos.indexOf(nuevasOperaciones[index].tipo_operacion);
+      const nextIndex = (currentIndex + 1) % tipos.length;
+      nuevasOperaciones[index] = {
+        ...nuevasOperaciones[index],
+        tipo_operacion: tipos[nextIndex],
+      };
+      return nuevasOperaciones;
+    });
+  }, []);
 
-  const ciclaTipoValor = (index: number) => {
-    const nuevoTipo = operaciones[index].tipo_valor === 'Porcentaje' ? 'Número' : 'Porcentaje';
-    actualizarOperacion(index, 'tipo_valor', nuevoTipo);
-  };
+  const ciclaTipoValor = useCallback((index: number) => {
+    setOperaciones(prevOps => {
+      const nuevasOperaciones = [...prevOps];
+      const nuevoTipo = nuevasOperaciones[index].tipo_valor === 'Porcentaje' ? 'Número' : 'Porcentaje';
+      nuevasOperaciones[index] = {
+        ...nuevasOperaciones[index],
+        tipo_valor: nuevoTipo,
+      };
+      return nuevasOperaciones;
+    });
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -233,7 +277,7 @@ export default function FlowsScreen() {
                 style={styles.actionButton}
                 buttonColor="#d32f2f"
                 icon="delete"
-                disabled={!selectedFlujo || loading}
+                disabled={!selectedFlujo || saving}
                 compact
               >
                 Borrar
@@ -242,9 +286,9 @@ export default function FlowsScreen() {
                 mode="contained"
                 onPress={guardarFlujo}
                 style={styles.actionButton}
-                loading={loading}
+                loading={saving}
                 icon="content-save"
-                disabled={loading}
+                disabled={saving}
                 compact
               >
                 Guardar
@@ -272,7 +316,7 @@ export default function FlowsScreen() {
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Operaciones</Text>
+              <Text style={styles.sectionTitle}>Operaciones ({operaciones.length})</Text>
               <Button
                 mode="contained"
                 onPress={agregarOperacion}
@@ -290,7 +334,7 @@ export default function FlowsScreen() {
               </View>
             ) : (
               operaciones.map((operacion, index) => (
-                <View key={index} style={styles.operacionCard}>
+                <View key={`op-${index}-${operacion.nombre}`} style={styles.operacionCard}>
                   <View style={styles.operacionHeader}>
                     <Text style={styles.operacionNumero}>Operación {index + 1}</Text>
                     <View style={styles.operacionButtons}>
@@ -374,7 +418,7 @@ export default function FlowsScreen() {
               />
             </View>
             <Divider />
-            {loading ? (
+            {flujosLoading ? (
               <ActivityIndicator style={styles.loader} size="large" />
             ) : (
               <FlatList

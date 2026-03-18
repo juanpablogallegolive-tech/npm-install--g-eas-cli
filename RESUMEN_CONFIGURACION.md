@@ -55,7 +55,7 @@
 ### Opción A: Probar AHORA en tu celular (2 minutos)
 
 1. Descarga **Expo Go** en tu celular
-2. Abre en el navegador: https://calc-movil.preview.emergentagent.com
+2. Abre en el navegador: https://calc-mobile-app-1.preview.emergentagent.com
 3. Escanea el QR que aparece
 4. ¡Listo! La app se abre en Expo Go
 

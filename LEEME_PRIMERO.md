@@ -40,7 +40,7 @@
 ### ¿Qué necesito hacer?
 Para **probar ahora** (2 minutos):
 1. Descargar Expo Go en tu celular
-2. Escanear QR en: https://calc-movil.preview.emergentagent.com
+2. Escanear QR en: https://calc-mobile-app-1.preview.emergentagent.com
 
 Para **generar APK** (30-45 minutos):
 1. **Lee INSTRUCCIONES_REALES.md** 👈 IMPORTANTE
@@ -151,7 +151,7 @@ En tu computadora:
 ### Quiero probar la app YA (2 minutos)
 ```
 1. Descarga Expo Go en tu celular
-2. Ve a: https://calc-movil.preview.emergentagent.com
+2. Ve a: https://calc-mobile-app-1.preview.emergentagent.com
 3. Escanea el QR
 4. ¡Listo!
 ```
