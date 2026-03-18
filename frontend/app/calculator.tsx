@@ -342,7 +342,15 @@ export default function CalculatorScreen() {
         {/* Selector de Flujo */}
         <Card style={styles.card}>
           <Card.Content>
-            <Text style={styles.sectionTitle}>Flujo de Cálculo</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Flujo de Cálculo</Text>
+              <IconButton
+                icon="refresh"
+                size={20}
+                onPress={loadFlujos}
+                style={styles.refreshButton}
+              />
+            </View>
             <TouchableOpacity
               style={styles.dropdownButton}
               onPress={() => setModalFlujoVisible(true)}
