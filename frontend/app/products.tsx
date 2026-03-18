@@ -1,42 +1,56 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
-  StyleSheet,
   FlatList,
+  StyleSheet,
   Alert,
+  Modal,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import {
   Text,
-  Searchbar,
-  FAB,
-  Card,
-  ActivityIndicator,
-  Portal,
-  Modal,
   TextInput,
   Button,
+  Card,
+  Searchbar,
+  FAB,
+  IconButton,
+  ActivityIndicator,
+  Divider,
 } from 'react-native-paper';
 import { productosApi } from '../services/api';
 import { Producto } from '../types/types';
 
 export default function ProductsScreen() {
   const [productos, setProductos] = useState<Producto[]>([]);
-  const [displayedProductos, setDisplayedProductos] = useState<Producto[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredProductos, setFilteredProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Modal states
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Producto | null>(null);
-  
   const [nombre, setNombre] = useState('');
   const [costoOriginal, setCostoOriginal] = useState('');
+  const [costoBase, setCostoBase] = useState('');
   const [comentarios, setComentarios] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadProductos();
   }, []);
 
   useEffect(() => {
-    filterProductos();
+    if (searchQuery) {
+      const filtered = productos.filter(p =>
+        p.nombre.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredProductos(filtered);
+    } else {
+      setFilteredProductos(productos);
+    }
   }, [searchQuery, productos]);
 
   const loadProductos = async () => {
@@ -44,6 +58,7 @@ export default function ProductsScreen() {
       setLoading(true);
       const response = await productosApi.getAll();
       setProductos(response.data);
+      setFilteredProductos(response.data);
     } catch (error) {
       console.error('Error al cargar productos:', error);
       Alert.alert('Error', 'No se pudieron cargar los productos');
@@ -52,107 +67,171 @@ export default function ProductsScreen() {
     }
   };
 
-  const filterProductos = () => {
-    if (searchQuery.trim() === '') {
-      setDisplayedProductos(productos);
-    } else {
-      const filtered = productos.filter((p) =>
-        p.nombre.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setDisplayedProductos(filtered);
-    }
-  };
-
-  const openModal = (producto?: Producto) => {
-    if (producto) {
-      setEditingProduct(producto);
-      setNombre(producto.nombre);
-      setCostoOriginal(producto.costo_original.toString());
-      setComentarios(producto.comentarios || '');
-    } else {
-      setEditingProduct(null);
-      setNombre('');
-      setCostoOriginal('');
-      setComentarios('');
-    }
+  const openNewProduct = () => {
+    setEditingProduct(null);
+    setNombre('');
+    setCostoOriginal('');
+    setCostoBase('');
+    setComentarios('');
     setModalVisible(true);
   };
 
-  const closeModal = () => {
-    setModalVisible(false);
-    setEditingProduct(null);
+  const openEditProduct = (producto: Producto) => {
+    setEditingProduct(producto);
+    setNombre(producto.nombre);
+    setCostoOriginal(producto.costo_original.toString());
+    setCostoBase(producto.costo_base.toString());
+    setComentarios(producto.comentarios || '');
+    setModalVisible(true);
   };
 
-  const guardarProducto = async () => {
-    if (!nombre.trim() || !costoOriginal.trim()) {
-      Alert.alert('Error', 'Completa todos los campos obligatorios');
+  const saveProduct = async () => {
+    if (!nombre.trim()) {
+      Alert.alert('Error', 'Ingresa un nombre para el producto');
       return;
     }
 
-    const costo = parseFloat(costoOriginal);
-    if (isNaN(costo) || costo < 0) {
-      Alert.alert('Error', 'Ingresa un costo válido');
-      return;
-    }
+    const costoOrig = parseFloat(costoOriginal) || 0;
+    const costoB = parseFloat(costoBase) || costoOrig;
 
     try {
-      setLoading(true);
-      const productoData = {
-        nombre,
-        costo_original: costo,
-        costo_base: costo,
-        comentarios,
-      };
+      setSaving(true);
 
       if (editingProduct) {
-        await productosApi.update(editingProduct._id, productoData);
+        // Check if price changed
+        const precioAnterior = editingProduct.costo_base;
+        let nuevoComentario = comentarios;
+        
+        if (precioAnterior !== costoB) {
+          nuevoComentario = `${comentarios}\n[Precio actualizado: $${precioAnterior} -> $${costoB} el ${new Date().toLocaleDateString()}]`;
+        }
+
+        await productosApi.update(editingProduct._id, {
+          nombre: nombre.trim(),
+          costo_original: costoOrig,
+          costo_base: costoB,
+          comentarios: nuevoComentario,
+        });
         Alert.alert('Éxito', 'Producto actualizado');
       } else {
-        await productosApi.create(productoData);
+        await productosApi.create({
+          nombre: nombre.trim(),
+          costo_original: costoOrig,
+          costo_base: costoB,
+          comentarios,
+        });
         Alert.alert('Éxito', 'Producto creado');
       }
 
-      closeModal();
+      setModalVisible(false);
       loadProductos();
     } catch (error) {
       console.error('Error al guardar producto:', error);
       Alert.alert('Error', 'No se pudo guardar el producto');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const renderProducto = ({ item }: { item: Producto }) => (
-    <Card style={styles.card} onPress={() => openModal(item)}>
-      <Card.Content>
-        <Text style={styles.nombre}>{item.nombre}</Text>
-        <Text style={styles.costo}>Costo base: ${item.costo_base.toLocaleString()}</Text>
-        {item.comentarios && (
-          <Text style={styles.comentario}>{item.comentarios}</Text>
-        )}
-      </Card.Content>
-    </Card>
-  );
+  const deleteProduct = (producto: Producto) => {
+    Alert.alert(
+      'Confirmar',
+      `¿Eliminar "${producto.nombre}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await productosApi.delete(producto._id);
+              Alert.alert('Éxito', 'Producto eliminado');
+              loadProductos();
+            } catch (error) {
+              Alert.alert('Error', 'No se pudo eliminar el producto');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderProduct = ({ item }: { item: Producto }) => {
+    const hasUpdate = item.comentarios?.includes('[Precio actualizado') || 
+                      item.comentarios?.includes('[Actualizado desde Excel');
+    
+    return (
+      <Card style={styles.productCard}>
+        <Card.Content>
+          <View style={styles.productHeader}>
+            <View style={styles.productInfo}>
+              <Text style={styles.productName}>{item.nombre}</Text>
+              <Text style={styles.productPrice}>
+                Costo Base: ${item.costo_base.toLocaleString('es-CO')}
+              </Text>
+              {item.costo_original !== item.costo_base && (
+                <Text style={styles.productOriginal}>
+                  Costo Original: ${item.costo_original.toLocaleString('es-CO')}
+                </Text>
+              )}
+              {hasUpdate && (
+                <View style={styles.updateBadge}>
+                  <Text style={styles.updateText}>Precio actualizado</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.productActions}>
+              <IconButton
+                icon="pencil"
+                size={20}
+                onPress={() => openEditProduct(item)}
+              />
+              <IconButton
+                icon="delete"
+                size={20}
+                iconColor="#d32f2f"
+                onPress={() => deleteProduct(item)}
+              />
+            </View>
+          </View>
+        </Card.Content>
+      </Card>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      <Searchbar
-        placeholder="Buscar productos..."
-        onChangeText={setSearchQuery}
-        value={searchQuery}
-        style={styles.searchbar}
-      />
+      <View style={styles.searchContainer}>
+        <Searchbar
+          placeholder="Buscar producto..."
+          onChangeText={setSearchQuery}
+          value={searchQuery}
+          style={styles.searchbar}
+        />
+      </View>
 
-      {loading && productos.length === 0 ? (
+      <View style={styles.statsContainer}>
+        <Text style={styles.statsText}>
+          {filteredProductos.length} producto(s) encontrado(s)
+        </Text>
+        <Button mode="text" onPress={loadProductos} icon="refresh">
+          Recargar
+        </Button>
+      </View>
+
+      {loading ? (
         <ActivityIndicator size="large" style={styles.loader} />
       ) : (
         <FlatList
-          data={displayedProductos}
-          renderItem={renderProducto}
+          data={filteredProductos}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.list}
+          renderItem={renderProduct}
+          contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>No hay productos</Text>
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No hay productos</Text>
+              <Text style={styles.emptySubText}>Presiona + para agregar uno nuevo</Text>
+            </View>
           }
         />
       )}
@@ -160,65 +239,83 @@ export default function ProductsScreen() {
       <FAB
         icon="plus"
         style={styles.fab}
-        onPress={() => openModal()}
+        onPress={openNewProduct}
       />
 
-      <Portal>
-        <Modal
-          visible={modalVisible}
-          onDismiss={closeModal}
-          contentContainerStyle={styles.modal}
+      {/* Modal for editing/creating product */}
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
         >
-          <Text style={styles.modalTitle}>
-            {editingProduct ? 'Editar Producto' : 'Nuevo Producto'}
-          </Text>
-          
-          <TextInput
-            mode="outlined"
-            label="Nombre *"
-            value={nombre}
-            onChangeText={setNombre}
-            style={styles.input}
-          />
-          
-          <TextInput
-            mode="outlined"
-            label="Costo Original *"
-            value={costoOriginal}
-            onChangeText={setCostoOriginal}
-            keyboardType="numeric"
-            style={styles.input}
-          />
-          
-          <TextInput
-            mode="outlined"
-            label="Comentarios"
-            value={comentarios}
-            onChangeText={setComentarios}
-            multiline
-            numberOfLines={3}
-            style={styles.input}
-          />
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {editingProduct ? 'Editar Producto' : 'Nuevo Producto'}
+              </Text>
+              <IconButton
+                icon="close"
+                size={24}
+                onPress={() => setModalVisible(false)}
+              />
+            </View>
+            <Divider />
+            
+            <View style={styles.modalBody}>
+              <TextInput
+                mode="outlined"
+                label="Nombre *"
+                value={nombre}
+                onChangeText={setNombre}
+                style={styles.input}
+              />
+              
+              <TextInput
+                mode="outlined"
+                label="Costo Original"
+                value={costoOriginal}
+                onChangeText={setCostoOriginal}
+                keyboardType="numeric"
+                style={styles.input}
+              />
+              
+              <TextInput
+                mode="outlined"
+                label="Costo Base"
+                value={costoBase}
+                onChangeText={setCostoBase}
+                keyboardType="numeric"
+                style={styles.input}
+              />
+              
+              <TextInput
+                mode="outlined"
+                label="Comentarios"
+                value={comentarios}
+                onChangeText={setComentarios}
+                multiline
+                numberOfLines={3}
+                style={styles.input}
+              />
 
-          <View style={styles.modalButtons}>
-            <Button
-              mode="outlined"
-              onPress={closeModal}
-              style={styles.modalButton}
-            >
-              Cancelar
-            </Button>
-            <Button
-              mode="contained"
-              onPress={guardarProducto}
-              loading={loading}
-              style={styles.modalButton}
-            >
-              Guardar
-            </Button>
+              <Button
+                mode="contained"
+                onPress={saveProduct}
+                loading={saving}
+                disabled={saving}
+                style={styles.saveButton}
+              >
+                {editingProduct ? 'Actualizar' : 'Crear'}
+              </Button>
+            </View>
           </View>
-        </Modal>
-      </Portal>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -228,65 +325,123 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  searchContainer: {
+    padding: 16,
+    paddingBottom: 8,
+  },
   searchbar: {
-    margin: 16,
+    elevation: 0,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  statsText: {
+    fontSize: 14,
+    color: '#666',
   },
   loader: {
     marginTop: 50,
   },
-  list: {
+  listContent: {
     padding: 16,
-    paddingTop: 0,
+    paddingTop: 8,
   },
-  card: {
-    marginBottom: 12,
+  productCard: {
+    marginBottom: 8,
+    elevation: 2,
   },
-  nombre: {
+  productHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  productInfo: {
+    flex: 1,
+  },
+  productName: {
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 4,
+    color: '#333',
   },
-  costo: {
+  productPrice: {
     fontSize: 14,
-    color: '#666',
-  },
-  comentario: {
-    fontSize: 12,
-    color: '#999',
+    color: '#6200ee',
     marginTop: 4,
   },
-  emptyText: {
-    textAlign: 'center',
+  productOriginal: {
+    fontSize: 12,
     color: '#999',
-    marginTop: 50,
+    marginTop: 2,
+  },
+  updateBadge: {
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  updateText: {
+    fontSize: 11,
+    color: '#ff9800',
+    fontWeight: '500',
+  },
+  productActions: {
+    flexDirection: 'row',
+  },
+  emptyContainer: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#999',
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: '#aaa',
+    marginTop: 4,
   },
   fab: {
     position: 'absolute',
-    margin: 16,
-    right: 0,
-    bottom: 0,
+    right: 16,
+    bottom: 16,
     backgroundColor: '#6200ee',
   },
-  modal: {
-    backgroundColor: 'white',
-    padding: 20,
-    margin: 20,
-    borderRadius: 8,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 16,
+    color: '#333',
+  },
+  modalBody: {
+    padding: 16,
   },
   input: {
     marginBottom: 12,
+    backgroundColor: '#fff',
   },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 8,
+  saveButton: {
     marginTop: 8,
-  },
-  modalButton: {
-    flex: 1,
   },
 });

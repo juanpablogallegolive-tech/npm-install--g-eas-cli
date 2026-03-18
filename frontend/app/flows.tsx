@@ -7,6 +7,7 @@ import {
   Modal,
   TouchableOpacity,
   FlatList,
+  Platform,
 } from 'react-native';
 import {
   Text,
@@ -22,10 +23,8 @@ import { Flujo, Operacion } from '../types/types';
 import { useStore } from '../store/store';
 
 export default function FlowsScreen() {
-  // Global state from Zustand
   const { flujos, fetchFlujos, addFlujo, updateFlujoInStore, removeFlujo, flujosLoading } = useStore();
   
-  // Local state
   const [selectedFlujo, setSelectedFlujo] = useState<Flujo | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -33,7 +32,6 @@ export default function FlowsScreen() {
   const [nombreFlujo, setNombreFlujo] = useState('');
   const [operaciones, setOperaciones] = useState<Operacion[]>([]);
 
-  // Load flujos on mount
   useEffect(() => {
     loadFlujos();
   }, []);
@@ -42,7 +40,6 @@ export default function FlowsScreen() {
     await fetchFlujos();
   };
 
-  // Auto-select first flujo when flujos change
   useEffect(() => {
     if (flujos.length > 0 && !selectedFlujo) {
       selectFlujo(flujos[0]);
@@ -52,7 +49,6 @@ export default function FlowsScreen() {
   const selectFlujo = useCallback((flujo: Flujo) => {
     setSelectedFlujo(flujo);
     setNombreFlujo(flujo.nombre);
-    // Create a deep copy of operaciones to avoid mutation issues
     setOperaciones(flujo.operaciones.map(op => ({ ...op })));
     setModalVisible(false);
   }, []);
@@ -81,7 +77,6 @@ export default function FlowsScreen() {
             try {
               setSaving(true);
               await flujosApi.delete(selectedFlujo._id);
-              // Update global store
               removeFlujo(selectedFlujo._id);
               Alert.alert('Éxito', 'Flujo eliminado');
               nuevoFlujo();
@@ -121,10 +116,7 @@ export default function FlowsScreen() {
       };
 
       if (selectedFlujo) {
-        // Update existing flujo
         await flujosApi.update(selectedFlujo._id, flujoData);
-        
-        // Update in global store
         const updatedFlujo: Flujo = {
           ...selectedFlujo,
           ...flujoData,
@@ -132,17 +124,12 @@ export default function FlowsScreen() {
         };
         updateFlujoInStore(updatedFlujo);
         setSelectedFlujo(updatedFlujo);
-        
         Alert.alert('Éxito', 'Flujo actualizado correctamente');
       } else {
-        // Create new flujo
         const response = await flujosApi.create(flujoData);
         const newFlujo = response.data;
-        
-        // Add to global store
         addFlujo(newFlujo);
         setSelectedFlujo(newFlujo);
-        
         Alert.alert('Éxito', 'Flujo creado correctamente');
       }
     } catch (error) {
@@ -153,7 +140,6 @@ export default function FlowsScreen() {
     }
   };
 
-  // FIX: Correctly add only ONE new operation - using functional update
   const agregarOperacion = useCallback(() => {
     setOperaciones(prevOps => {
       const nuevaOperacion: Operacion = {
@@ -177,21 +163,27 @@ export default function FlowsScreen() {
     });
   }, []);
 
+  // FIXED: Direct delete without Alert for better UX
   const eliminarOperacion = useCallback((index: number) => {
-    Alert.alert(
-      'Confirmar',
-      '¿Eliminar esta operación?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => {
-            setOperaciones(prevOps => prevOps.filter((_, i) => i !== index));
-          }
-        },
-      ]
-    );
+    if (Platform.OS === 'web') {
+      // On web, just delete directly
+      setOperaciones(prevOps => prevOps.filter((_, i) => i !== index));
+    } else {
+      Alert.alert(
+        'Confirmar',
+        '¿Eliminar esta operación?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Eliminar',
+            style: 'destructive',
+            onPress: () => {
+              setOperaciones(prevOps => prevOps.filter((_, i) => i !== index));
+            }
+          },
+        ]
+      );
+    }
   }, []);
 
   const moverOperacion = useCallback((index: number, direccion: 'arriba' | 'abajo') => {
@@ -242,7 +234,6 @@ export default function FlowsScreen() {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView} keyboardShouldPersistTaps="handled">
-        {/* Selector de Flujo */}
         <Card style={styles.card}>
           <Card.Content>
             <Text style={styles.label}>Flujo Actual</Text>
@@ -258,7 +249,6 @@ export default function FlowsScreen() {
           </Card.Content>
         </Card>
 
-        {/* Botones de Acción */}
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.buttonRow}>
@@ -297,7 +287,6 @@ export default function FlowsScreen() {
           </Card.Content>
         </Card>
 
-        {/* Nombre del Flujo */}
         <Card style={styles.card}>
           <Card.Content>
             <Text style={styles.label}>Nombre del Flujo *</Text>
@@ -312,7 +301,6 @@ export default function FlowsScreen() {
           </Card.Content>
         </Card>
 
-        {/* Operaciones */}
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
@@ -334,7 +322,7 @@ export default function FlowsScreen() {
               </View>
             ) : (
               operaciones.map((operacion, index) => (
-                <View key={`op-${index}-${operacion.nombre}`} style={styles.operacionCard}>
+                <View key={`op-${index}`} style={styles.operacionCard}>
                   <View style={styles.operacionHeader}>
                     <Text style={styles.operacionNumero}>Operación {index + 1}</Text>
                     <View style={styles.operacionButtons}>
@@ -400,7 +388,6 @@ export default function FlowsScreen() {
         <View style={styles.bottomSpace} />
       </ScrollView>
 
-      {/* Modal para seleccionar flujo */}
       <Modal
         visible={modalVisible}
         transparent
@@ -586,7 +573,6 @@ const styles = StyleSheet.create({
   loader: {
     marginVertical: 32,
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

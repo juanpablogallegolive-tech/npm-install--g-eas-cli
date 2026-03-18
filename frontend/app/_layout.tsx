@@ -60,12 +60,18 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
+          name="import-export"
+          options={{
+            title: 'Importar',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons name="swap-horizontal" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="quotes"
           options={{
-            title: 'Cotizaciones',
-            tabBarIcon: ({ color, size }) => (
-              <MaterialCommunityIcons name="receipt" size={size} color={color} />
-            ),
+            href: null,
           }}
         />
         <Tabs.Screen
