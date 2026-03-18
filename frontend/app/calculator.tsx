@@ -47,21 +47,32 @@ export default function CalculatorScreen() {
   const [loading, setLoading] = useState(false);
   const [calculando, setCalculando] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
-  const isFocused = useIsFocused();
+  const appState = useRef(AppState.currentState);
 
-  // Recargar flujos cada vez que la pantalla recibe foco
+  // Cargar flujos al inicio
   useEffect(() => {
-    if (isFocused) {
-      loadFlujos();
-    }
-  }, [isFocused]);
+    loadFlujos();
+  }, []);
+
+  // Recargar flujos cuando la app vuelve a estar activa
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        loadFlujos();
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   // Actualizar el flujo seleccionado cuando cambien los flujos
   useEffect(() => {
     if (selectedFlujo && flujos.length > 0) {
       const flujoActualizado = flujos.find(f => f._id === selectedFlujo._id);
       if (flujoActualizado) {
-        // Verificar si las operaciones cambiaron
         const operacionesCambiaron = JSON.stringify(flujoActualizado.operaciones) !== JSON.stringify(selectedFlujo.operaciones);
         if (operacionesCambiaron) {
           setSelectedFlujo(flujoActualizado);
