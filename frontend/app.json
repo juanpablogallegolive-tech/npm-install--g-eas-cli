@@ -50,6 +50,8 @@
     },
     "plugins": [
       "expo-router",
+      "expo-document-picker",
+      "expo-file-system",
       [
         "expo-splash-screen",
         {
