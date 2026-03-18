@@ -10,6 +10,7 @@ import {
   Modal,
   FlatList,
   Keyboard,
+  AppState,
 } from 'react-native';
 import {
   Text,
@@ -24,7 +25,6 @@ import {
 } from 'react-native-paper';
 import { productosApi, flujosApi, calcularPrecio, calculosApi } from '../services/api';
 import { Producto, Flujo, Cliente } from '../types/types';
-import { useIsFocused } from '@react-navigation/native';
 
 export default function CalculatorScreen() {
   const [searchQuery, setSearchQuery] = useState('');
