@@ -626,6 +626,9 @@ const styles = StyleSheet.create({
   dropdownIcon: {
     margin: 0,
   },
+  refreshButton: {
+    margin: 0,
+  },
   inputRow: {
     marginBottom: 16,
   },
