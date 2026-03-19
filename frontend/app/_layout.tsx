@@ -1,8 +1,20 @@
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Provider as PaperProvider } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Platform } from 'react-native';
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  
+  // Calcular el padding inferior basado en el área segura del dispositivo
+  // Esto ajusta automáticamente para dispositivos con barra de gestos o botones virtuales
+  const bottomPadding = Platform.select({
+    ios: Math.max(insets.bottom, 8),
+    android: Math.max(insets.bottom, 8),
+    default: 8,
+  });
+
   return (
     <PaperProvider>
       <Tabs
@@ -10,17 +22,40 @@ export default function TabLayout() {
           tabBarActiveTintColor: '#6200ee',
           tabBarInactiveTintColor: '#666',
           tabBarStyle: {
-            height: 60,
-            paddingBottom: 8,
-            paddingTop: 8,
+            height: 56 + bottomPadding,
+            paddingBottom: bottomPadding,
+            paddingTop: 6,
+            backgroundColor: '#ffffff',
+            borderTopWidth: 1,
+            borderTopColor: '#e0e0e0',
+            elevation: 8,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 4,
+          },
+          tabBarLabelStyle: {
+            fontSize: 10,
+            fontWeight: '500',
+            marginTop: 2,
+          },
+          tabBarIconStyle: {
+            marginTop: 2,
           },
           headerStyle: {
             backgroundColor: '#6200ee',
+            elevation: 4,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.2,
+            shadowRadius: 4,
           },
           headerTintColor: '#fff',
           headerTitleStyle: {
             fontWeight: 'bold',
+            fontSize: 18,
           },
+          headerSafeAreaInsets: { top: insets.top },
         }}
       >
         <Tabs.Screen
@@ -62,7 +97,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="quotes"
           options={{
-            title: 'Cotizaciones',
+            title: 'Cotizar',
             tabBarIcon: ({ color, size }) => (
               <MaterialCommunityIcons name="receipt" size={size} color={color} />
             ),
