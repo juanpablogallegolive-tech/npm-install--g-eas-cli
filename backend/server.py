@@ -162,14 +162,23 @@ def aplicar_operacion(precio_base: float, operacion: dict, valor: float) -> floa
 # ==================== ENDPOINTS PRODUCTOS ====================
 
 @app.get("/api/productos")
-def get_productos(skip: int = 0, limit: int = 100):
-    productos = list(productos_col.find().skip(skip).limit(limit))
+def get_productos(skip: int = 0, limit: int = 0):
+    # Si limit es 0, obtener todos los productos
+    if limit == 0:
+        productos = list(productos_col.find().skip(skip))
+    else:
+        productos = list(productos_col.find().skip(skip).limit(limit))
     return [serialize_doc(p) for p in productos]
 
+@app.get("/api/productos/count")
+def count_productos():
+    total = productos_col.count_documents({})
+    return {"total": total}
+
 @app.get("/api/productos/buscar")
-def buscar_productos(q: str):
+def buscar_productos(q: str, limit: int = 50):
     regex = {"$regex": q, "$options": "i"}
-    productos = list(productos_col.find({"nombre": regex}).limit(20))
+    productos = list(productos_col.find({"nombre": regex}).limit(limit))
     return [serialize_doc(p) for p in productos]
 
 @app.get("/api/productos/{producto_id}")
