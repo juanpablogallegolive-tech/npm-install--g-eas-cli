@@ -191,9 +191,14 @@ export default function HistoryScreen() {
                 mode="contained"
                 onPress={() => {
                   setModalVisible(false);
-                  Alert.alert('Info', 'Función de cargar en calculadora próximamente');
+                  // Navigate to calculator and pass data
+                  router.push({
+                    pathname: '/calculator',
+                    params: { calculoId: selectedCalculo._id }
+                  });
                 }}
                 style={styles.modalButton}
+                icon="calculator"
               >
                 Cargar en Calculadora
               </Button>

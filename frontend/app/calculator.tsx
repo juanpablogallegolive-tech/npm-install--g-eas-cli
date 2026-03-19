@@ -22,11 +22,10 @@ import {
   Divider,
 } from 'react-native-paper';
 import { productosApi, calcularPrecio, calculosApi } from '../services/api';
-import { Producto, Flujo, Cliente } from '../types/types';
+import { Producto, Flujo, Cliente, Calculo } from '../types/types';
 import { useStore } from '../store/store';
 
 export default function CalculatorScreen() {
-  // Global state from Zustand - this will auto-update when flujos change
   const { flujos, fetchFlujos, flujosVersion } = useStore();
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,8 +33,16 @@ export default function CalculatorScreen() {
   const [showResults, setShowResults] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   
+  // Costo base editable
+  const [costoBaseEditable, setCostoBaseEditable] = useState('0');
+  
   const [selectedFlujo, setSelectedFlujo] = useState<Flujo | null>(null);
   const [modalFlujoVisible, setModalFlujoVisible] = useState(false);
+  
+  // Modal para cargar desde historial
+  const [modalHistorialVisible, setModalHistorialVisible] = useState(false);
+  const [historial, setHistorial] = useState<Calculo[]>([]);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
   
   const [valoresOperaciones, setValoresOperaciones] = useState<Record<string, string>>({});
   const [clientes, setClientes] = useState<Array<{
@@ -49,12 +56,10 @@ export default function CalculatorScreen() {
   const [calculando, setCalculando] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Load flujos on mount
   useEffect(() => {
     fetchFlujos();
   }, []);
 
-  // Auto-select first flujo when flujos load and none selected
   useEffect(() => {
     if (flujos.length > 0 && !selectedFlujo) {
       setSelectedFlujo(flujos[0]);
@@ -62,19 +67,16 @@ export default function CalculatorScreen() {
     }
   }, [flujos]);
 
-  // Update selected flujo when global flujos change (sync with Flows tab)
   useEffect(() => {
     if (selectedFlujo && flujos.length > 0) {
       const flujoActualizado = flujos.find(f => f._id === selectedFlujo._id);
       if (flujoActualizado) {
-        // Check if operations changed
         const operacionesCambiaron = JSON.stringify(flujoActualizado.operaciones) !== JSON.stringify(selectedFlujo.operaciones);
         if (operacionesCambiaron) {
           setSelectedFlujo(flujoActualizado);
           initOperaciones(flujoActualizado);
         }
       } else {
-        // Flujo was deleted, select first available
         if (flujos.length > 0) {
           setSelectedFlujo(flujos[0]);
           initOperaciones(flujos[0]);
@@ -117,10 +119,10 @@ export default function CalculatorScreen() {
   const selectProduct = (producto: Producto) => {
     setSelectedProduct(producto);
     setSearchQuery(producto.nombre);
+    setCostoBaseEditable(producto.costo_base.toString());
     setShowResults(false);
     Keyboard.dismiss();
     
-    // Si el producto tiene un flujo, cargarlo
     if (producto.flujo_id) {
       const flujo = flujos.find(f => f._id === producto.flujo_id);
       if (flujo) {
@@ -134,7 +136,8 @@ export default function CalculatorScreen() {
     setSelectedFlujo(flujo);
     setModalFlujoVisible(false);
     initOperaciones(flujo);
-    setClientes([]);
+    // Reset precios al cambiar flujo
+    setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
   };
 
   const addCliente = () => {
@@ -152,29 +155,35 @@ export default function CalculatorScreen() {
   };
 
   const removeCliente = (index: number) => {
-    Alert.alert(
-      'Confirmar',
-      '¿Eliminar este cliente?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => setClientes(clientes.filter((_, i) => i !== index))
-        },
-      ]
-    );
+    if (Platform.OS === 'web') {
+      setClientes(clientes.filter((_, i) => i !== index));
+    } else {
+      Alert.alert(
+        'Confirmar',
+        '¿Eliminar este cliente?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { 
+            text: 'Eliminar',
+            style: 'destructive',
+            onPress: () => setClientes(clientes.filter((_, i) => i !== index))
+          },
+        ]
+      );
+    }
   };
 
   const updateCliente = (index: number, field: string, value: string) => {
     const newClientes = [...clientes];
-    newClientes[index] = { ...newClientes[index], [field]: value };
+    newClientes[index] = { ...newClientes[index], [field]: value, precio_final: 0 };
     setClientes(newClientes);
   };
 
   const calcular = async () => {
-    if (!selectedProduct) {
-      Alert.alert('Error', 'Selecciona un producto primero');
+    const costoBase = parseFloat(costoBaseEditable) || 0;
+    
+    if (costoBase <= 0) {
+      Alert.alert('Error', 'Ingresa un costo base válido');
       return;
     }
     
@@ -209,7 +218,7 @@ export default function CalculatorScreen() {
       }));
 
       const response = await calcularPrecio({
-        costo_base: selectedProduct.costo_original,
+        costo_base: costoBase,
         flujo_id: selectedFlujo._id,
         valores_operaciones: valoresNum,
         clientes: clientesData,
@@ -234,7 +243,9 @@ export default function CalculatorScreen() {
   };
 
   const guardar = async () => {
-    if (!selectedProduct || !selectedFlujo || clientes.length === 0) {
+    const costoBase = parseFloat(costoBaseEditable) || 0;
+    
+    if (!selectedFlujo || clientes.length === 0) {
       Alert.alert('Error', 'Completa todos los campos antes de guardar');
       return;
     }
@@ -260,20 +271,18 @@ export default function CalculatorScreen() {
       }));
 
       await calculosApi.create({
-        nombre_producto: selectedProduct.nombre,
+        nombre_producto: selectedProduct?.nombre || 'Producto personalizado',
         flujo_nombre: selectedFlujo.nombre,
         flujo_id: selectedFlujo._id,
         valores_operaciones: valoresNum,
         clientes: clientesGuardar,
-        costo_base: selectedProduct.costo_base,
+        costo_base: costoBase,
       });
 
       Alert.alert('Éxito', 'Cálculo guardado en el historial');
       
-      setSelectedProduct(null);
-      setSearchQuery('');
-      setClientes([]);
-      setValoresOperaciones({});
+      // Limpiar formulario
+      limpiarFormulario();
       
     } catch (error) {
       console.error('Error al guardar:', error);
@@ -283,7 +292,64 @@ export default function CalculatorScreen() {
     }
   };
 
-  // Refresh flujos from API
+  const limpiarFormulario = () => {
+    setSelectedProduct(null);
+    setSearchQuery('');
+    setCostoBaseEditable('0');
+    setClientes([]);
+    if (selectedFlujo) {
+      initOperaciones(selectedFlujo);
+    }
+  };
+
+  // Cargar historial
+  const abrirHistorial = async () => {
+    setModalHistorialVisible(true);
+    setLoadingHistorial(true);
+    try {
+      const response = await calculosApi.getAll();
+      setHistorial(response.data);
+    } catch (error) {
+      console.error('Error al cargar historial:', error);
+      Alert.alert('Error', 'No se pudo cargar el historial');
+    } finally {
+      setLoadingHistorial(false);
+    }
+  };
+
+  // Cargar cálculo desde historial
+  const cargarDesdeHistorial = (calculo: Calculo) => {
+    // Buscar el flujo
+    const flujo = flujos.find(f => f._id === calculo.flujo_id || f.nombre === calculo.flujo_nombre);
+    
+    if (flujo) {
+      setSelectedFlujo(flujo);
+      
+      // Cargar valores de operaciones
+      const valores: Record<string, string> = {};
+      flujo.operaciones.forEach(op => {
+        valores[op.nombre] = (calculo.valores_operaciones[op.nombre] || 0).toString();
+      });
+      setValoresOperaciones(valores);
+    }
+    
+    // Cargar datos del producto
+    setSearchQuery(calculo.nombre_producto);
+    setCostoBaseEditable(calculo.costo_base.toString());
+    
+    // Cargar clientes
+    const clientesCargados = calculo.clientes.map(c => ({
+      nombre: c.nombre,
+      porcentaje_ganancia: c.porcentaje_ganancia.toString(),
+      comentario: c.comentario || '',
+      precio_final: c.precio_final,
+    }));
+    setClientes(clientesCargados);
+    
+    setModalHistorialVisible(false);
+    Alert.alert('Cargado', 'Datos cargados desde el historial');
+  };
+
   const handleRefreshFlujos = async () => {
     await fetchFlujos();
     Alert.alert('Actualizado', 'Lista de flujos actualizada');
@@ -300,6 +366,32 @@ export default function CalculatorScreen() {
         style={styles.scrollView}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Botón cargar desde historial */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.quickActions}>
+              <Button
+                mode="outlined"
+                onPress={abrirHistorial}
+                icon="history"
+                compact
+                style={styles.quickButton}
+              >
+                Cargar desde Historial
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={limpiarFormulario}
+                icon="eraser"
+                compact
+                style={styles.quickButton}
+              >
+                Limpiar
+              </Button>
+            </View>
+          </Card.Content>
+        </Card>
+
         {/* Búsqueda de Producto */}
         <Card style={styles.card}>
           <Card.Content>
@@ -327,6 +419,27 @@ export default function CalculatorScreen() {
                 </ScrollView>
               </View>
             )}
+          </Card.Content>
+        </Card>
+
+        {/* Costo Base Editable */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <Text style={styles.sectionTitle}>Costo Base</Text>
+            <Text style={styles.helpText}>Puedes editar el costo base para este cálculo</Text>
+            <TextInput
+              mode="outlined"
+              label="Costo Base ($)"
+              value={costoBaseEditable}
+              onChangeText={(text) => {
+                setCostoBaseEditable(text);
+                // Reset precios al cambiar costo
+                setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
+              }}
+              keyboardType="numeric"
+              style={styles.input}
+              left={<TextInput.Affix text="$" />}
+            />
           </Card.Content>
         </Card>
 
@@ -374,10 +487,14 @@ export default function CalculatorScreen() {
                     mode="outlined"
                     keyboardType="numeric"
                     value={valoresOperaciones[operacion.nombre] || '0'}
-                    onChangeText={(text) => setValoresOperaciones({
-                      ...valoresOperaciones,
-                      [operacion.nombre]: text,
-                    })}
+                    onChangeText={(text) => {
+                      setValoresOperaciones({
+                        ...valoresOperaciones,
+                        [operacion.nombre]: text,
+                      });
+                      // Reset precios al cambiar valores
+                      setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
+                    }}
                     style={styles.input}
                     dense
                   />
@@ -466,7 +583,7 @@ export default function CalculatorScreen() {
             mode="contained"
             onPress={calcular}
             loading={calculando}
-            disabled={!selectedProduct || !selectedFlujo || clientes.length === 0 || calculando}
+            disabled={parseFloat(costoBaseEditable) <= 0 || !selectedFlujo || clientes.length === 0 || calculando}
             style={styles.button}
             icon="calculator"
           >
@@ -543,6 +660,58 @@ export default function CalculatorScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal para cargar desde historial */}
+      <Modal
+        visible={modalHistorialVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalHistorialVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Cargar desde Historial</Text>
+              <IconButton
+                icon="close"
+                size={24}
+                onPress={() => setModalHistorialVisible(false)}
+              />
+            </View>
+            <Divider />
+            {loadingHistorial ? (
+              <ActivityIndicator size="large" style={styles.loader} />
+            ) : (
+              <FlatList
+                data={historial}
+                keyExtractor={(item) => item._id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.historialItem}
+                    onPress={() => cargarDesdeHistorial(item)}
+                  >
+                    <View style={styles.historialInfo}>
+                      <Text style={styles.historialProducto}>{item.nombre_producto}</Text>
+                      <Text style={styles.historialFlujo}>Flujo: {item.flujo_nombre}</Text>
+                      <Text style={styles.historialCosto}>Costo Base: ${item.costo_base.toLocaleString()}</Text>
+                      <Text style={styles.historialClientes}>
+                        {item.clientes.length} cliente(s) - Precio: ${item.clientes[0]?.precio_final.toLocaleString() || 0}
+                      </Text>
+                    </View>
+                    <IconButton icon="chevron-right" size={20} />
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No hay cálculos guardados.</Text>
+                    <Text style={styles.emptySubText}>Guarda un cálculo primero.</Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -560,6 +729,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     elevation: 2,
   },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickButton: {
+    flex: 1,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -571,6 +747,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  helpText: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+    fontStyle: 'italic',
   },
   searchbar: {
     marginBottom: 8,
@@ -771,5 +953,38 @@ const styles = StyleSheet.create({
   emptyContainer: {
     padding: 32,
     alignItems: 'center',
+  },
+  // Historial styles
+  historialItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  historialInfo: {
+    flex: 1,
+  },
+  historialProducto: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  historialFlujo: {
+    fontSize: 13,
+    color: '#6200ee',
+    marginTop: 2,
+  },
+  historialCosto: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  historialClientes: {
+    fontSize: 12,
+    color: '#2e7d32',
+    marginTop: 2,
   },
 });
