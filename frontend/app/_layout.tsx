@@ -55,7 +55,6 @@ export default function TabLayout() {
             fontWeight: 'bold',
             fontSize: 18,
           },
-          headerSafeAreaInsets: { top: insets.top },
         }}
       >
         <Tabs.Screen

@@ -97,9 +97,9 @@ export default function ImportExportScreen() {
         Alert.alert('Éxito', `Archivo "${fileName}" descargado.\n\nProductos exportados: ${productos.length}`);
       } else {
         // Mobile: Save and share
-        const fileUri = FileSystem.documentDirectory + fileName;
+        const fileUri = (FileSystem.documentDirectory || '') + fileName;
         await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-          encoding: FileSystem.EncodingType.UTF8,
+          encoding: 'utf8' as any,
         });
 
         const canShare = await Sharing.isAvailableAsync();
@@ -156,7 +156,7 @@ export default function ImportExportScreen() {
         fileContent = await response.text();
       } else {
         fileContent = await FileSystem.readAsStringAsync(file.uri, {
-          encoding: FileSystem.EncodingType.UTF8,
+          encoding: 'utf8' as any,
         });
       }
 

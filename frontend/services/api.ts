@@ -59,6 +59,6 @@ export const calcularPrecio = (data: {
   flujo_id: string;
   valores_operaciones: Record<string, number>;
   clientes: Array<{ nombre: string; porcentaje_ganancia: number; comentario?: string }>;
-}) => api.post<{ costo_base: number; resultados: Cliente[] }>('/calcular', data);
+}) => api.post<{ costo_base: number; precio_calculado: number; resultados: Cliente[] }>('/calcular', data);
 
 export default api;
