@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 # Configuration - Use the specific URL from the review request
-BASE_URL = "https://calc-mobile-app-1.preview.emergentagent.com/api"
+BASE_URL = "https://calc-flow-sync.preview.emergentagent.com/api"
 
 class FlujosAPITester:
     def __init__(self):

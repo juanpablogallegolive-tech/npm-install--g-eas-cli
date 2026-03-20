@@ -130,7 +130,7 @@ backend:
           comment: "✅ GET /api/flujos working correctly - found 1 flow 'Cálculo con IVA' with proper operations (IVA sumar porcentaje, Descuento mayorista restar porcentaje)."
         - working: true
           agent: "testing"
-          comment: "✅ Complete CRUD testing successful for flujos endpoints. Tested with live URL https://calc-mobile-app-1.preview.emergentagent.com/api - GET initial flows (3 flows found), POST create 'Flujo de Prueba' (ID: 69baf3eddaab3c4a15d81993), GET verify in list, DELETE successful. Database persistence confirmed."
+          comment: "✅ Complete CRUD testing successful for flujos endpoints. Tested with live URL https://calc-flow-sync.preview.emergentagent.com/api - GET initial flows (3 flows found), POST create 'Flujo de Prueba' (ID: 69baf3eddaab3c4a15d81993), GET verify in list, DELETE successful. Database persistence confirmed."
 
   - task: "Price Calculation API"
     implemented: true
@@ -210,4 +210,4 @@ agent_communication:
     - agent: "testing"
       message: "Completed comprehensive backend testing. All 7 test categories passed: health check, productos endpoints, flujos endpoints, price calculation, save calculation, and cotizaciones. Backend is fully functional with 4349 products loaded and proper flow configuration."
     - agent: "testing"
-      message: "New testing completed per review request: Successfully tested CRUD operations for flujos endpoints using live URL https://calc-mobile-app-1.preview.emergentagent.com/api. All 4 tests passed: GET initial flows (found 3 flows), POST create new flow (created 'Flujo de Prueba' with ID 69baf3eddaab3c4a15d81993), GET verify flow appears in list, DELETE test flow successfully. Database persistence and API responses working correctly."
+      message: "New testing completed per review request: Successfully tested CRUD operations for flujos endpoints using live URL https://calc-flow-sync.preview.emergentagent.com/api. All 4 tests passed: GET initial flows (found 3 flows), POST create new flow (created 'Flujo de Prueba' with ID 69baf3eddaab3c4a15d81993), GET verify flow appears in list, DELETE test flow successfully. Database persistence and API responses working correctly."
