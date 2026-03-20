@@ -41,15 +41,30 @@ export default function ImportExportScreen() {
     setSnackVisible(true);
   };
 
-  // Crear contenido CSV
+  // Obtener directorio disponible
+  const getAvailableDirectory = (): string => {
+    // Prioridad: documentDirectory > cacheDirectory > fallback
+    if (FileSystem.documentDirectory) {
+      return FileSystem.documentDirectory;
+    }
+    if (FileSystem.cacheDirectory) {
+      return FileSystem.cacheDirectory;
+    }
+    // Fallback para casos extremos
+    return '';
+  };
+
+  // Crear contenido CSV con BOM para Excel
   const createCSVContent = (productos: any[]): string => {
-    let csv = 'Nombre,Costo_Original,Costo_Base,Comentarios\n';
+    // BOM para que Excel reconozca UTF-8
+    let csv = '\uFEFF';
+    csv += 'Nombre,Costo_Original,Costo_Base,Comentarios\n';
     
     productos.forEach((p) => {
       const nombre = String(p.nombre || '').replace(/"/g, '""');
       const costoOrig = p.costo_original || 0;
       const costoBase = p.costo_base || 0;
-      const comentarios = String(p.comentarios || '').replace(/"/g, '""').replace(/\n/g, ' ');
+      const comentarios = String(p.comentarios || '').replace(/"/g, '""').replace(/[\n\r]/g, ' ');
       
       csv += `"${nombre}",${costoOrig},${costoBase},"${comentarios}"\n`;
     });
@@ -57,7 +72,7 @@ export default function ImportExportScreen() {
     return csv;
   };
 
-  // EXPORTAR - Función principal
+  // ========== EXPORTAR ==========
   const exportarDatos = async () => {
     setLoading(true);
     setProgress(0);
@@ -65,7 +80,7 @@ export default function ImportExportScreen() {
     setExportResult(null);
     
     try {
-      // 1. Cargar productos
+      // 1. Cargar productos desde API
       const response = await productosApi.getAll();
       const productos = response.data;
       
@@ -84,75 +99,98 @@ export default function ImportExportScreen() {
       
       // 3. Nombre del archivo
       const fecha = new Date().toISOString().slice(0, 10);
-      const fileName = `productos_${fecha}.csv`;
+      const hora = new Date().toTimeString().slice(0, 5).replace(':', '');
+      const fileName = `productos_${fecha}_${hora}.csv`;
 
-      setProgress(0.6);
-      setStatus('Preparando descarga...');
+      setProgress(0.5);
 
-      // 4. Guardar y compartir según plataforma
+      // 4. Exportar según plataforma
       if (Platform.OS === 'web') {
-        // WEB: Descargar directamente
-        const BOM = '\uFEFF'; // Para que Excel reconozca UTF-8
-        const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = window.URL.createObjectURL(blob);
+        // ===== WEB: Descargar directamente =====
+        setStatus('Descargando...');
         
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        
-        setTimeout(() => {
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(url);
-        }, 100);
-        
-        setExportResult({ total: productos.length, fileName });
-        showSnack(`Descargado: ${fileName}`);
-        
-      } else {
-        // MÓVIL: Guardar en cache y compartir
-        const cacheDir = FileSystem.cacheDirectory;
-        if (!cacheDir) {
-          throw new Error('No se puede acceder al directorio de cache');
+        try {
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const url = window.URL.createObjectURL(blob);
+          
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          
+          setTimeout(() => {
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+          }, 100);
+          
+          setExportResult({ total: productos.length, fileName });
+          showSnack('Archivo descargado');
+        } catch (webError) {
+          console.error('Error web:', webError);
+          throw new Error('No se pudo descargar en navegador');
         }
         
-        const filePath = cacheDir + fileName;
+      } else {
+        // ===== MÓVIL: Guardar y compartir =====
+        setStatus('Preparando archivo...');
         
+        // Verificar si sharing está disponible
+        const canShare = await Sharing.isAvailableAsync();
+        if (!canShare) {
+          Alert.alert('Error', 'Tu dispositivo no soporta compartir archivos');
+          setLoading(false);
+          setStatus('');
+          return;
+        }
+
+        // Obtener directorio
+        const directory = getAvailableDirectory();
+        if (!directory) {
+          Alert.alert('Error', 'No se puede acceder al almacenamiento del dispositivo');
+          setLoading(false);
+          setStatus('');
+          return;
+        }
+
+        const filePath = directory + fileName;
+        
+        setProgress(0.7);
+        setStatus('Guardando archivo...');
+
         // Escribir archivo
         await FileSystem.writeAsStringAsync(filePath, csvContent, {
           encoding: FileSystem.EncodingType.UTF8,
         });
-        
-        setProgress(0.8);
-        setStatus('Abriendo opciones de compartir...');
-        
-        // Verificar si se puede compartir
-        const canShare = await Sharing.isAvailableAsync();
-        
-        if (canShare) {
-          await Sharing.shareAsync(filePath, {
-            mimeType: 'text/csv',
-            dialogTitle: 'Exportar Productos',
-            UTI: 'public.comma-separated-values-text',
-          });
-          setExportResult({ total: productos.length, fileName });
-          showSnack(`${productos.length} productos exportados`);
-        } else {
-          // Si no se puede compartir, mostrar la ruta
-          setExportResult({ total: productos.length, fileName: filePath });
-          showSnack(`Archivo guardado en: ${filePath}`);
+
+        // Verificar que se creó el archivo
+        const fileInfo = await FileSystem.getInfoAsync(filePath);
+        if (!fileInfo.exists) {
+          throw new Error('El archivo no se pudo crear');
         }
+
+        setProgress(0.9);
+        setStatus('Abriendo opciones...');
+
+        // Compartir
+        await Sharing.shareAsync(filePath, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Exportar Productos',
+          UTI: 'public.comma-separated-values-text',
+        });
+
+        setExportResult({ total: productos.length, fileName });
+        showSnack(`${productos.length} productos exportados`);
       }
 
       setProgress(1);
       
     } catch (error: any) {
       console.error('Error exportando:', error);
-      const errorMsg = error?.message || 'Error desconocido';
-      showSnack(`Error: ${errorMsg}`);
-      Alert.alert('Error al Exportar', `No se pudo exportar: ${errorMsg}\n\nIntenta de nuevo.`);
+      const msg = error?.message || 'Error desconocido';
+      Alert.alert('Error al Exportar', msg);
+      showSnack('Error: ' + msg);
     } finally {
       setLoading(false);
       setStatus('');
@@ -160,18 +198,18 @@ export default function ImportExportScreen() {
     }
   };
 
-  // IMPORTAR - Función principal
+  // ========== IMPORTAR ==========
   const importarDatos = async () => {
     setLoading(true);
     setProgress(0);
-    setStatus('Selecciona un archivo CSV...');
+    setStatus('Selecciona un archivo...');
     setImportResults(null);
     setExportResult(null);
 
     try {
       // 1. Seleccionar archivo
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', '*/*'],
+        type: ['text/csv', 'text/comma-separated-values', 'text/plain', '*/*'],
         copyToCacheDirectory: true,
       });
 
@@ -185,7 +223,7 @@ export default function ImportExportScreen() {
       setStatus('Leyendo archivo...');
       setProgress(0.1);
 
-      // 2. Leer contenido del archivo
+      // 2. Leer contenido
       let content: string;
       
       if (Platform.OS === 'web') {
@@ -197,8 +235,13 @@ export default function ImportExportScreen() {
         });
       }
 
+      // Remover BOM si existe
+      if (content.charCodeAt(0) === 0xFEFF) {
+        content = content.slice(1);
+      }
+
       // 3. Parsear CSV
-      const lines = content.split('\n').filter(line => line.trim().length > 0);
+      const lines = content.split(/\r?\n/).filter(line => line.trim().length > 0);
       
       if (lines.length < 2) {
         showSnack('Archivo vacío o sin datos');
@@ -212,20 +255,19 @@ export default function ImportExportScreen() {
 
       // Parsear header
       const header = parseCSVLine(lines[0]);
-      const colNombre = findColumn(header, ['nombre', 'producto', 'name']);
-      const colCostoOrig = findColumn(header, ['costo_original', 'costo original', 'original']);
-      const colCostoBase = findColumn(header, ['costo_base', 'costo base', 'costo', 'precio', 'price']);
+      const colNombre = findColumn(header, ['nombre', 'producto', 'name', 'item']);
+      const colCostoOrig = findColumn(header, ['costo_original', 'costo original', 'original', 'cost']);
+      const colCostoBase = findColumn(header, ['costo_base', 'costo base', 'costo', 'precio', 'price', 'base']);
 
       if (colNombre === -1) {
-        showSnack('No se encontró columna "Nombre"');
-        Alert.alert('Error', 'El archivo debe tener una columna llamada "Nombre"');
+        Alert.alert('Error', 'El archivo debe tener una columna "Nombre"');
         setLoading(false);
         setStatus('');
         return;
       }
 
       setProgress(0.3);
-      setStatus('Cargando productos existentes...');
+      setStatus('Verificando productos existentes...');
 
       // 4. Obtener productos existentes
       const existingRes = await productosApi.getAll();
@@ -240,6 +282,8 @@ export default function ImportExportScreen() {
       let sinCambios = 0;
       let errores = 0;
       const total = lines.length - 1;
+
+      setStatus(`Procesando ${total} registros...`);
 
       for (let i = 1; i < lines.length; i++) {
         try {
@@ -257,14 +301,14 @@ export default function ImportExportScreen() {
           const existing = existingMap.get(nombre.toLowerCase().trim());
 
           if (existing) {
-            // Producto existe - verificar si cambió el precio
-            const cambioOrig = Math.abs(existing.costo_original - costoOrig) > 0.01;
-            const cambioBase = Math.abs(existing.costo_base - costoBase) > 0.01;
+            // Verificar si cambió el precio
+            const cambio = Math.abs(existing.costo_base - costoBase) > 0.01 || 
+                          Math.abs(existing.costo_original - costoOrig) > 0.01;
             
-            if (cambioOrig || cambioBase) {
+            if (cambio) {
               const fecha = new Date().toLocaleDateString('es-CO');
               let comentario = existing.comentarios || '';
-              comentario += `\n[Importado: $${existing.costo_base} -> $${costoBase} el ${fecha}]`;
+              comentario += `\n[Importado: $${existing.costo_base} -> $${costoBase} (${fecha})]`;
               
               await productosApi.update(existing._id, {
                 nombre: existing.nombre,
@@ -277,7 +321,7 @@ export default function ImportExportScreen() {
               sinCambios++;
             }
           } else {
-            // Producto nuevo
+            // Crear nuevo
             await productosApi.create({
               nombre,
               costo_original: costoOrig,
@@ -287,13 +331,13 @@ export default function ImportExportScreen() {
             nuevos++;
           }
 
-          // Actualizar progreso cada 10 items
-          if (i % 10 === 0) {
-            setProgress(0.3 + (0.6 * i / total));
+          // Actualizar progreso
+          if (i % 5 === 0 || i === total) {
+            setProgress(0.3 + (0.65 * i / total));
             setStatus(`Procesando ${i}/${total}...`);
           }
         } catch (e) {
-          console.error('Error en línea', i, e);
+          console.error('Error línea', i, e);
           errores++;
         }
       }
@@ -301,13 +345,14 @@ export default function ImportExportScreen() {
       setProgress(1);
       setImportResults({ nuevos, actualizados, sinCambios, errores });
       
-      const mensaje = `Nuevos: ${nuevos}, Actualizados: ${actualizados}, Sin cambios: ${sinCambios}`;
-      showSnack(mensaje);
+      Alert.alert(
+        'Importación Completa',
+        `Nuevos: ${nuevos}\nActualizados: ${actualizados}\nSin cambios: ${sinCambios}\nErrores: ${errores}`
+      );
       
     } catch (error: any) {
       console.error('Error importando:', error);
-      showSnack('Error al importar archivo');
-      Alert.alert('Error', 'No se pudo leer el archivo. Verifica que sea un CSV válido.');
+      Alert.alert('Error', 'No se pudo leer el archivo');
     } finally {
       setLoading(false);
       setStatus('');
@@ -315,7 +360,7 @@ export default function ImportExportScreen() {
     }
   };
 
-  // Parsear línea CSV respetando comillas
+  // Parsear línea CSV
   const parseCSVLine = (line: string): string[] => {
     const result: string[] = [];
     let current = '';
@@ -342,7 +387,7 @@ export default function ImportExportScreen() {
     return result;
   };
 
-  // Buscar columna por posibles nombres
+  // Buscar columna
   const findColumn = (header: string[], names: string[]): number => {
     for (const name of names) {
       const idx = header.findIndex(h => 
@@ -355,17 +400,17 @@ export default function ImportExportScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         
         {/* EXPORTAR */}
         <Card style={styles.card}>
           <Card.Content>
-            <View style={styles.header}>
+            <View style={styles.headerRow}>
               <List.Icon icon="download" color="#6200ee" />
               <Text style={styles.title}>Exportar Productos</Text>
             </View>
             <Text style={styles.desc}>
-              Descarga todos los productos en un archivo CSV. Puedes abrirlo en Excel y compartirlo a otro celular.
+              Descarga un archivo CSV con todos los productos para compartir a otro celular.
             </Text>
             <Button
               mode="contained"
@@ -375,7 +420,7 @@ export default function ImportExportScreen() {
               icon="file-export"
               style={styles.btn}
             >
-              Exportar a CSV
+              Exportar CSV
             </Button>
           </Card.Content>
         </Card>
@@ -384,11 +429,8 @@ export default function ImportExportScreen() {
         {exportResult && (
           <Card style={[styles.card, styles.successCard]}>
             <Card.Content>
-              <List.Icon icon="check-circle" color="#4caf50" />
-              <Text style={styles.successText}>
-                ✓ {exportResult.total} productos exportados
-              </Text>
-              <Text style={styles.fileText}>{exportResult.fileName}</Text>
+              <Text style={styles.successText}>✓ {exportResult.total} productos exportados</Text>
+              <Text style={styles.fileName}>{exportResult.fileName}</Text>
             </Card.Content>
           </Card>
         )}
@@ -396,16 +438,16 @@ export default function ImportExportScreen() {
         {/* IMPORTAR */}
         <Card style={styles.card}>
           <Card.Content>
-            <View style={styles.header}>
+            <View style={styles.headerRow}>
               <List.Icon icon="upload" color="#4caf50" />
               <Text style={styles.title}>Importar Productos</Text>
             </View>
             <Text style={styles.desc}>
-              Importa productos desde un archivo CSV. Debe tener columna "Nombre".
+              Selecciona un archivo CSV exportado de otro celular.
             </Text>
-            <Text style={styles.note}>• Productos nuevos se agregan</Text>
-            <Text style={styles.note}>• Productos existentes se actualizan si el precio cambió</Text>
-            <Text style={styles.note}>• No se duplican productos</Text>
+            <Text style={styles.bullet}>• Productos nuevos se agregan</Text>
+            <Text style={styles.bullet}>• Productos existentes se actualizan si el precio cambió</Text>
+            <Text style={styles.bullet}>• No se duplican datos</Text>
             <Button
               mode="contained"
               onPress={importarDatos}
@@ -439,22 +481,22 @@ export default function ImportExportScreen() {
             <Card.Content>
               <Text style={styles.resultsTitle}>Resultados</Text>
               <Divider style={styles.divider} />
-              <View style={styles.resultRow}>
-                <Text>Productos nuevos:</Text>
-                <Text style={[styles.resultNum, {color: '#4caf50'}]}>{importResults.nuevos}</Text>
+              <View style={styles.row}>
+                <Text>Nuevos:</Text>
+                <Text style={[styles.num, {color: '#4caf50'}]}>{importResults.nuevos}</Text>
               </View>
-              <View style={styles.resultRow}>
+              <View style={styles.row}>
                 <Text>Actualizados:</Text>
-                <Text style={[styles.resultNum, {color: '#ff9800'}]}>{importResults.actualizados}</Text>
+                <Text style={[styles.num, {color: '#ff9800'}]}>{importResults.actualizados}</Text>
               </View>
-              <View style={styles.resultRow}>
+              <View style={styles.row}>
                 <Text>Sin cambios:</Text>
-                <Text style={[styles.resultNum, {color: '#666'}]}>{importResults.sinCambios}</Text>
+                <Text style={[styles.num, {color: '#666'}]}>{importResults.sinCambios}</Text>
               </View>
               {importResults.errores > 0 && (
-                <View style={styles.resultRow}>
+                <View style={styles.row}>
                   <Text>Errores:</Text>
-                  <Text style={[styles.resultNum, {color: '#f44336'}]}>{importResults.errores}</Text>
+                  <Text style={[styles.num, {color: '#f44336'}]}>{importResults.errores}</Text>
                 </View>
               )}
             </Card.Content>
@@ -464,11 +506,11 @@ export default function ImportExportScreen() {
         {/* Instrucciones */}
         <Card style={styles.card}>
           <Card.Content>
-            <Text style={styles.infoTitle}>Sincronizar entre celulares:</Text>
+            <Text style={styles.infoTitle}>Cómo sincronizar:</Text>
             <Text style={styles.step}>1. Exporta en el celular origen</Text>
-            <Text style={styles.step}>2. Comparte por WhatsApp/Email/Drive</Text>
+            <Text style={styles.step}>2. Comparte por WhatsApp/Email</Text>
             <Text style={styles.step}>3. Descarga en el celular destino</Text>
-            <Text style={styles.step}>4. Importa el archivo CSV</Text>
+            <Text style={styles.step}>4. Importa el archivo</Text>
           </Card.Content>
         </Card>
 
@@ -478,8 +520,7 @@ export default function ImportExportScreen() {
       <Snackbar
         visible={snackVisible}
         onDismiss={() => setSnackVisible(false)}
-        duration={4000}
-        action={{ label: 'OK', onPress: () => setSnackVisible(false) }}
+        duration={3000}
       >
         {snackMessage}
       </Snackbar>
@@ -490,23 +531,23 @@ export default function ImportExportScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 32 },
+  content: { padding: 16 },
   card: { marginBottom: 12, borderRadius: 12, elevation: 2 },
   successCard: { backgroundColor: '#e8f5e9' },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: -8 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: -8 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-  desc: { fontSize: 14, color: '#666', marginBottom: 12, lineHeight: 20 },
-  note: { fontSize: 13, color: '#666', marginLeft: 8, marginBottom: 4 },
+  desc: { fontSize: 14, color: '#666', marginBottom: 8, lineHeight: 20 },
+  bullet: { fontSize: 13, color: '#666', marginLeft: 8, marginBottom: 4 },
   btn: { marginTop: 12, borderRadius: 8 },
-  successText: { fontSize: 16, fontWeight: 'bold', color: '#2e7d32', marginTop: 8 },
-  fileText: { fontSize: 12, color: '#666', marginTop: 4 },
-  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  successText: { fontSize: 16, fontWeight: 'bold', color: '#2e7d32' },
+  fileName: { fontSize: 12, color: '#666', marginTop: 4 },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
   statusText: { fontSize: 14, color: '#666', flex: 1 },
   progressBar: { height: 6, borderRadius: 3 },
   resultsTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   divider: { marginVertical: 8 },
-  resultRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
-  resultNum: { fontSize: 18, fontWeight: 'bold' },
-  infoTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 12, color: '#333' },
-  step: { fontSize: 14, color: '#666', marginBottom: 6, marginLeft: 8 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
+  num: { fontSize: 18, fontWeight: 'bold' },
+  infoTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 8, color: '#333' },
+  step: { fontSize: 14, color: '#666', marginBottom: 4, marginLeft: 8 },
 });
