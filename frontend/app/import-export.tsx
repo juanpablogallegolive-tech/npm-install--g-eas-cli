@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Alert,
   Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import {
   Text,
@@ -22,150 +21,163 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { productosApi } from '../services/api';
 
-// Simple CSV creator
-const createCSV = (data: any[][]): string => {
-  let csv = '';
-  data.forEach(row => {
-    csv += row.map(cell => {
-      const cellStr = String(cell === null || cell === undefined ? '' : cell);
-      if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
-        return `"${cellStr.replace(/"/g, '""')}"`;
-      }
-      return cellStr;
-    }).join(',') + '\n';
-  });
-  return csv;
-};
-
 export default function ImportExportScreen() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [progress, setProgress] = useState(0);
-  const [snackbarVisible, setSnackbarVisible] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackVisible, setSnackVisible] = useState(false);
+  const [snackMessage, setSnackMessage] = useState('');
   
   const [exportResult, setExportResult] = useState<{ total: number; fileName: string } | null>(null);
   const [importResults, setImportResults] = useState<{
-    productos: { nuevos: number; actualizados: number; sinCambios: number };
+    nuevos: number; 
+    actualizados: number; 
+    sinCambios: number;
     errores: number;
   } | null>(null);
 
-  const showMessage = (message: string) => {
-    setSnackbarMessage(message);
-    setSnackbarVisible(true);
+  const showSnack = (msg: string) => {
+    setSnackMessage(msg);
+    setSnackVisible(true);
   };
 
-  // Exportar datos a CSV
+  // Crear contenido CSV
+  const createCSVContent = (productos: any[]): string => {
+    let csv = 'Nombre,Costo_Original,Costo_Base,Comentarios\n';
+    
+    productos.forEach((p) => {
+      const nombre = String(p.nombre || '').replace(/"/g, '""');
+      const costoOrig = p.costo_original || 0;
+      const costoBase = p.costo_base || 0;
+      const comentarios = String(p.comentarios || '').replace(/"/g, '""').replace(/\n/g, ' ');
+      
+      csv += `"${nombre}",${costoOrig},${costoBase},"${comentarios}"\n`;
+    });
+    
+    return csv;
+  };
+
+  // EXPORTAR - Función principal
   const exportarDatos = async () => {
+    setLoading(true);
+    setProgress(0);
+    setStatus('Cargando productos...');
+    setExportResult(null);
+    
     try {
-      setLoading(true);
-      setProgress(0);
-      setStatus('Cargando productos...');
-      setExportResult(null);
-
-      const productosRes = await productosApi.getAll();
-      const productos = productosRes.data;
-
-      if (productos.length === 0) {
-        showMessage('No hay productos para exportar');
+      // 1. Cargar productos
+      const response = await productosApi.getAll();
+      const productos = response.data;
+      
+      if (!productos || productos.length === 0) {
+        showSnack('No hay productos para exportar');
         setLoading(false);
         setStatus('');
         return;
       }
 
       setProgress(0.3);
-      setStatus(`Generando archivo con ${productos.length} productos...`);
+      setStatus(`Generando archivo (${productos.length} productos)...`);
 
-      // Crear CSV
-      const csvData: any[][] = [];
-      csvData.push(['Nombre', 'Costo_Original', 'Costo_Base', 'Comentarios']);
+      // 2. Crear contenido CSV
+      const csvContent = createCSVContent(productos);
       
-      productos.forEach((p: any) => {
-        csvData.push([
-          p.nombre || '',
-          p.costo_original || 0,
-          p.costo_base || 0,
-          (p.comentarios || '').replace(/\n/g, ' | '),
-        ]);
-      });
+      // 3. Nombre del archivo
+      const fecha = new Date().toISOString().slice(0, 10);
+      const fileName = `productos_${fecha}.csv`;
 
-      const csvContent = createCSV(csvData);
-      const fecha = new Date().toISOString().split('T')[0];
-      const hora = new Date().toTimeString().slice(0, 5).replace(':', '-');
-      const fileName = `productos_${fecha}_${hora}.csv`;
+      setProgress(0.6);
+      setStatus('Preparando descarga...');
 
-      setProgress(0.7);
-      setStatus('Descargando archivo...');
-
+      // 4. Guardar y compartir según plataforma
       if (Platform.OS === 'web') {
-        // Web download
-        try {
-          const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.setAttribute('href', url);
-          link.setAttribute('download', fileName);
-          link.style.visibility = 'hidden';
-          document.body.appendChild(link);
-          link.click();
+        // WEB: Descargar directamente
+        const BOM = '\uFEFF'; // Para que Excel reconozca UTF-8
+        const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        
+        setTimeout(() => {
           document.body.removeChild(link);
           window.URL.revokeObjectURL(url);
-          
-          setExportResult({ total: productos.length, fileName });
-          showMessage(`Archivo descargado: ${fileName}`);
-        } catch (e) {
-          console.error('Error en descarga web:', e);
-          showMessage('Error al descargar. Intenta de nuevo.');
-        }
+        }, 100);
+        
+        setExportResult({ total: productos.length, fileName });
+        showSnack(`Descargado: ${fileName}`);
+        
       } else {
-        // Mobile: Save and share
-        const fileUri = (FileSystem.documentDirectory || '') + fileName;
-        await FileSystem.writeAsStringAsync(fileUri, csvContent);
-
+        // MÓVIL: Guardar en cache y compartir
+        const cacheDir = FileSystem.cacheDirectory;
+        if (!cacheDir) {
+          throw new Error('No se puede acceder al directorio de cache');
+        }
+        
+        const filePath = cacheDir + fileName;
+        
+        // Escribir archivo
+        await FileSystem.writeAsStringAsync(filePath, csvContent, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        
+        setProgress(0.8);
+        setStatus('Abriendo opciones de compartir...');
+        
+        // Verificar si se puede compartir
         const canShare = await Sharing.isAvailableAsync();
+        
         if (canShare) {
-          await Sharing.shareAsync(fileUri, {
+          await Sharing.shareAsync(filePath, {
             mimeType: 'text/csv',
-            dialogTitle: 'Compartir Productos',
+            dialogTitle: 'Exportar Productos',
+            UTI: 'public.comma-separated-values-text',
           });
           setExportResult({ total: productos.length, fileName });
-          showMessage(`${productos.length} productos exportados`);
+          showSnack(`${productos.length} productos exportados`);
         } else {
-          setExportResult({ total: productos.length, fileName: fileUri });
-          showMessage(`Guardado en: ${fileUri}`);
+          // Si no se puede compartir, mostrar la ruta
+          setExportResult({ total: productos.length, fileName: filePath });
+          showSnack(`Archivo guardado en: ${filePath}`);
         }
       }
 
       setProgress(1);
-      setStatus('');
-    } catch (error) {
-      console.error('Error al exportar:', error);
-      showMessage('Error al exportar. Intenta de nuevo.');
-      setStatus('');
+      
+    } catch (error: any) {
+      console.error('Error exportando:', error);
+      const errorMsg = error?.message || 'Error desconocido';
+      showSnack(`Error: ${errorMsg}`);
+      Alert.alert('Error al Exportar', `No se pudo exportar: ${errorMsg}\n\nIntenta de nuevo.`);
     } finally {
       setLoading(false);
+      setStatus('');
       setProgress(0);
     }
   };
 
-  // Importar datos desde CSV
+  // IMPORTAR - Función principal
   const importarDatos = async () => {
-    try {
-      setLoading(true);
-      setProgress(0);
-      setStatus('Seleccionando archivo...');
-      setImportResults(null);
-      setExportResult(null);
+    setLoading(true);
+    setProgress(0);
+    setStatus('Selecciona un archivo CSV...');
+    setImportResults(null);
+    setExportResult(null);
 
+    try {
+      // 1. Seleccionar archivo
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'application/vnd.ms-excel', 
-               'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '*/*'],
+        type: ['text/csv', 'text/comma-separated-values', '*/*'],
         copyToCacheDirectory: true,
       });
 
-      if (result.canceled) {
-        setStatus('');
+      if (result.canceled || !result.assets || result.assets.length === 0) {
         setLoading(false);
+        setStatus('');
         return;
       }
 
@@ -173,174 +185,187 @@ export default function ImportExportScreen() {
       setStatus('Leyendo archivo...');
       setProgress(0.1);
 
-      let fileContent: string;
-
+      // 2. Leer contenido del archivo
+      let content: string;
+      
       if (Platform.OS === 'web') {
         const response = await fetch(file.uri);
-        fileContent = await response.text();
+        content = await response.text();
       } else {
-        fileContent = await FileSystem.readAsStringAsync(file.uri);
+        content = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
       }
 
-      setProgress(0.2);
-      setStatus('Procesando datos...');
-
-      // Parse CSV
-      const lines = fileContent.split('\n').filter(line => line.trim());
+      // 3. Parsear CSV
+      const lines = content.split('\n').filter(line => line.trim().length > 0);
+      
       if (lines.length < 2) {
-        showMessage('El archivo está vacío o no tiene datos');
+        showSnack('Archivo vacío o sin datos');
         setLoading(false);
         setStatus('');
         return;
       }
 
-      const header = parseCSVLine(lines[0]);
-      const nombreIdx = findColumnIndex(header, ['nombre', 'Nombre', 'NOMBRE', 'producto', 'Producto']);
-      const costoOrigIdx = findColumnIndex(header, ['costo_original', 'Costo_Original', 'Costo Original']);
-      const costoBaseIdx = findColumnIndex(header, ['costo_base', 'Costo_Base', 'Costo Base', 'precio', 'Precio']);
+      setProgress(0.2);
+      setStatus('Analizando datos...');
 
-      if (nombreIdx === -1) {
-        showMessage('No se encontró columna "Nombre"');
+      // Parsear header
+      const header = parseCSVLine(lines[0]);
+      const colNombre = findColumn(header, ['nombre', 'producto', 'name']);
+      const colCostoOrig = findColumn(header, ['costo_original', 'costo original', 'original']);
+      const colCostoBase = findColumn(header, ['costo_base', 'costo base', 'costo', 'precio', 'price']);
+
+      if (colNombre === -1) {
+        showSnack('No se encontró columna "Nombre"');
+        Alert.alert('Error', 'El archivo debe tener una columna llamada "Nombre"');
         setLoading(false);
         setStatus('');
         return;
       }
 
       setProgress(0.3);
-      setStatus('Comparando con productos existentes...');
+      setStatus('Cargando productos existentes...');
 
+      // 4. Obtener productos existentes
       const existingRes = await productosApi.getAll();
-      const existingProducts = existingRes.data;
       const existingMap = new Map<string, any>();
-      existingProducts.forEach((p: any) => {
+      existingRes.data.forEach((p: any) => {
         existingMap.set(p.nombre.toLowerCase().trim(), p);
       });
 
-      setProgress(0.4);
-
-      let productosNuevos = 0;
-      let productosActualizados = 0;
-      let productosSinCambios = 0;
+      // 5. Procesar cada línea
+      let nuevos = 0;
+      let actualizados = 0;
+      let sinCambios = 0;
       let errores = 0;
-
       const total = lines.length - 1;
 
       for (let i = 1; i < lines.length; i++) {
         try {
           const row = parseCSVLine(lines[i]);
-          if (row.length === 0 || !row[nombreIdx]) continue;
-
-          const nombre = row[nombreIdx].toString().trim();
+          
+          const nombre = (row[colNombre] || '').trim();
           if (!nombre) {
             errores++;
             continue;
           }
 
-          const costoOriginal = parseFloat(row[costoOrigIdx] || row[costoBaseIdx] || '0') || 0;
-          const costoBase = parseFloat(row[costoBaseIdx] || row[costoOrigIdx] || '0') || costoOriginal;
+          const costoOrig = parseFloat(row[colCostoOrig] || row[colCostoBase] || '0') || 0;
+          const costoBase = parseFloat(row[colCostoBase] || row[colCostoOrig] || '0') || costoOrig;
 
           const existing = existingMap.get(nombre.toLowerCase().trim());
 
           if (existing) {
-            if (Math.abs(existing.costo_base - costoBase) > 0.01 || Math.abs(existing.costo_original - costoOriginal) > 0.01) {
+            // Producto existe - verificar si cambió el precio
+            const cambioOrig = Math.abs(existing.costo_original - costoOrig) > 0.01;
+            const cambioBase = Math.abs(existing.costo_base - costoBase) > 0.01;
+            
+            if (cambioOrig || cambioBase) {
               const fecha = new Date().toLocaleDateString('es-CO');
-              const nuevoComentario = `${existing.comentarios || ''}\n[Sync: $${existing.costo_base} → $${costoBase} el ${fecha}]`.trim();
+              let comentario = existing.comentarios || '';
+              comentario += `\n[Importado: $${existing.costo_base} -> $${costoBase} el ${fecha}]`;
               
               await productosApi.update(existing._id, {
                 nombre: existing.nombre,
-                costo_original: costoOriginal,
+                costo_original: costoOrig,
                 costo_base: costoBase,
-                comentarios: nuevoComentario,
+                comentarios: comentario.trim(),
               });
-              productosActualizados++;
+              actualizados++;
             } else {
-              productosSinCambios++;
+              sinCambios++;
             }
           } else {
+            // Producto nuevo
             await productosApi.create({
               nombre,
-              costo_original: costoOriginal,
+              costo_original: costoOrig,
               costo_base: costoBase,
               comentarios: '',
             });
-            productosNuevos++;
+            nuevos++;
           }
 
-          setProgress(0.4 + (0.5 * (i / total)));
+          // Actualizar progreso cada 10 items
           if (i % 10 === 0) {
+            setProgress(0.3 + (0.6 * i / total));
             setStatus(`Procesando ${i}/${total}...`);
           }
         } catch (e) {
+          console.error('Error en línea', i, e);
           errores++;
         }
       }
 
       setProgress(1);
-      setStatus('');
-
-      setImportResults({
-        productos: { nuevos: productosNuevos, actualizados: productosActualizados, sinCambios: productosSinCambios },
-        errores,
-      });
-
-      showMessage(`Importación completa: ${productosNuevos} nuevos, ${productosActualizados} actualizados`);
-
-    } catch (error) {
-      console.error('Error al importar:', error);
-      showMessage('Error al importar. Verifica el archivo.');
-      setStatus('');
+      setImportResults({ nuevos, actualizados, sinCambios, errores });
+      
+      const mensaje = `Nuevos: ${nuevos}, Actualizados: ${actualizados}, Sin cambios: ${sinCambios}`;
+      showSnack(mensaje);
+      
+    } catch (error: any) {
+      console.error('Error importando:', error);
+      showSnack('Error al importar archivo');
+      Alert.alert('Error', 'No se pudo leer el archivo. Verifica que sea un CSV válido.');
     } finally {
       setLoading(false);
+      setStatus('');
       setProgress(0);
     }
   };
 
+  // Parsear línea CSV respetando comillas
   const parseCSVLine = (line: string): string[] => {
     const result: string[] = [];
     let current = '';
     let inQuotes = false;
     
     for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
+      const c = line[i];
+      
+      if (c === '"') {
         if (inQuotes && line[i + 1] === '"') {
           current += '"';
           i++;
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (char === ',' && !inQuotes) {
+      } else if (c === ',' && !inQuotes) {
         result.push(current.trim());
         current = '';
-      } else {
-        current += char;
+      } else if (c !== '\r') {
+        current += c;
       }
     }
     result.push(current.trim());
     return result;
   };
 
-  const findColumnIndex = (header: string[], possibleNames: string[]): number => {
-    for (const name of possibleNames) {
-      const idx = header.findIndex(h => h.toLowerCase().trim() === name.toLowerCase().trim());
+  // Buscar columna por posibles nombres
+  const findColumn = (header: string[], names: string[]): number => {
+    for (const name of names) {
+      const idx = header.findIndex(h => 
+        h.toLowerCase().trim().replace(/['"]/g, '') === name.toLowerCase()
+      );
       if (idx !== -1) return idx;
     }
     return -1;
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+    <View style={styles.container}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         
-        {/* Exportar */}
+        {/* EXPORTAR */}
         <Card style={styles.card}>
           <Card.Content>
-            <View style={styles.cardHeader}>
+            <View style={styles.header}>
               <List.Icon icon="download" color="#6200ee" />
               <Text style={styles.title}>Exportar Productos</Text>
             </View>
-            <Text style={styles.description}>
-              Descarga un archivo CSV con todos los productos. Puedes abrirlo en Excel y compartirlo a otro celular.
+            <Text style={styles.desc}>
+              Descarga todos los productos en un archivo CSV. Puedes abrirlo en Excel y compartirlo a otro celular.
             </Text>
             <Button
               mode="contained"
@@ -348,101 +373,89 @@ export default function ImportExportScreen() {
               loading={loading && status.includes('Cargando')}
               disabled={loading}
               icon="file-export"
-              style={styles.button}
-              contentStyle={styles.buttonContent}
+              style={styles.btn}
             >
               Exportar a CSV
             </Button>
           </Card.Content>
         </Card>
 
-        {/* Resultado de exportación */}
+        {/* Resultado exportación */}
         {exportResult && (
           <Card style={[styles.card, styles.successCard]}>
             <Card.Content>
-              <View style={styles.resultHeader}>
-                <List.Icon icon="check-circle" color="#4caf50" />
-                <Text style={styles.successTitle}>Exportación Exitosa</Text>
-              </View>
-              <Text style={styles.resultText}>Productos exportados: {exportResult.total}</Text>
-              <Text style={styles.resultText}>Archivo: {exportResult.fileName}</Text>
+              <List.Icon icon="check-circle" color="#4caf50" />
+              <Text style={styles.successText}>
+                ✓ {exportResult.total} productos exportados
+              </Text>
+              <Text style={styles.fileText}>{exportResult.fileName}</Text>
             </Card.Content>
           </Card>
         )}
 
-        {/* Importar */}
+        {/* IMPORTAR */}
         <Card style={styles.card}>
           <Card.Content>
-            <View style={styles.cardHeader}>
+            <View style={styles.header}>
               <List.Icon icon="upload" color="#4caf50" />
               <Text style={styles.title}>Importar Productos</Text>
             </View>
-            <Text style={styles.description}>
-              Importa productos desde un archivo CSV exportado de otro celular.
+            <Text style={styles.desc}>
+              Importa productos desde un archivo CSV. Debe tener columna "Nombre".
             </Text>
-            <View style={styles.bulletList}>
-              <Text style={styles.bulletItem}>• Debe tener columna "Nombre"</Text>
-              <Text style={styles.bulletItem}>• Columnas opcionales: "Costo_Base", "Costo_Original"</Text>
-              <Text style={styles.bulletItem}>• Productos existentes se actualizan si el precio cambió</Text>
-              <Text style={styles.bulletItem}>• No se duplican productos</Text>
-            </View>
+            <Text style={styles.note}>• Productos nuevos se agregan</Text>
+            <Text style={styles.note}>• Productos existentes se actualizan si el precio cambió</Text>
+            <Text style={styles.note}>• No se duplican productos</Text>
             <Button
               mode="contained"
               onPress={importarDatos}
               loading={loading && status.includes('Procesando')}
               disabled={loading}
               icon="file-import"
-              style={styles.button}
+              style={styles.btn}
               buttonColor="#4caf50"
-              contentStyle={styles.buttonContent}
             >
-              Importar desde CSV
+              Importar CSV
             </Button>
           </Card.Content>
         </Card>
 
         {/* Progreso */}
-        {loading && (
+        {loading && status && (
           <Card style={styles.card}>
             <Card.Content>
-              <View style={styles.statusContainer}>
+              <View style={styles.progressRow}>
                 <ActivityIndicator size="small" color="#6200ee" />
                 <Text style={styles.statusText}>{status}</Text>
               </View>
-              {progress > 0 && (
-                <ProgressBar progress={progress} color="#6200ee" style={styles.progressBar} />
-              )}
+              <ProgressBar progress={progress} color="#6200ee" style={styles.progressBar} />
             </Card.Content>
           </Card>
         )}
 
-        {/* Resultados de importación */}
+        {/* Resultado importación */}
         {importResults && (
           <Card style={styles.card}>
             <Card.Content>
-              <Text style={styles.resultsTitle}>Resultados de Importación</Text>
+              <Text style={styles.resultsTitle}>Resultados</Text>
               <Divider style={styles.divider} />
-              <List.Item
-                title="Productos nuevos"
-                right={() => <Text style={[styles.resultNumber, { color: '#4caf50' }]}>{importResults.productos.nuevos}</Text>}
-                left={() => <List.Icon icon="plus-circle" color="#4caf50" />}
-              />
-              <List.Item
-                title="Productos actualizados"
-                right={() => <Text style={[styles.resultNumber, { color: '#ff9800' }]}>{importResults.productos.actualizados}</Text>}
-                left={() => <List.Icon icon="update" color="#ff9800" />}
-              />
-              <List.Item
-                title="Sin cambios"
-                right={() => <Text style={[styles.resultNumber, { color: '#666' }]}>{importResults.productos.sinCambios}</Text>}
-                left={() => <List.Icon icon="check-circle" color="#666" />}
-              />
+              <View style={styles.resultRow}>
+                <Text>Productos nuevos:</Text>
+                <Text style={[styles.resultNum, {color: '#4caf50'}]}>{importResults.nuevos}</Text>
+              </View>
+              <View style={styles.resultRow}>
+                <Text>Actualizados:</Text>
+                <Text style={[styles.resultNum, {color: '#ff9800'}]}>{importResults.actualizados}</Text>
+              </View>
+              <View style={styles.resultRow}>
+                <Text>Sin cambios:</Text>
+                <Text style={[styles.resultNum, {color: '#666'}]}>{importResults.sinCambios}</Text>
+              </View>
               {importResults.errores > 0 && (
-                <List.Item
-                  title="Errores"
-                  right={() => <Text style={[styles.resultNumber, { color: '#f44336' }]}>{importResults.errores}</Text>}
-                  left={() => <List.Icon icon="alert-circle" color="#f44336" />}
-                />
+                <View style={styles.resultRow}>
+                  <Text>Errores:</Text>
+                  <Text style={[styles.resultNum, {color: '#f44336'}]}>{importResults.errores}</Text>
+                </View>
               )}
             </Card.Content>
           </Card>
@@ -451,70 +464,49 @@ export default function ImportExportScreen() {
         {/* Instrucciones */}
         <Card style={styles.card}>
           <Card.Content>
-            <Text style={styles.infoTitle}>¿Cómo sincronizar entre celulares?</Text>
-            <View style={styles.stepList}>
-              <View style={styles.step}>
-                <View style={styles.stepNumber}><Text style={styles.stepNumberText}>1</Text></View>
-                <Text style={styles.stepText}>Presiona "Exportar a CSV" en el celular origen</Text>
-              </View>
-              <View style={styles.step}>
-                <View style={styles.stepNumber}><Text style={styles.stepNumberText}>2</Text></View>
-                <Text style={styles.stepText}>Comparte el archivo por WhatsApp, Email o Drive</Text>
-              </View>
-              <View style={styles.step}>
-                <View style={styles.stepNumber}><Text style={styles.stepNumberText}>3</Text></View>
-                <Text style={styles.stepText}>En el celular destino, descarga el archivo</Text>
-              </View>
-              <View style={styles.step}>
-                <View style={styles.stepNumber}><Text style={styles.stepNumberText}>4</Text></View>
-                <Text style={styles.stepText}>Presiona "Importar desde CSV" y selecciona el archivo</Text>
-              </View>
-            </View>
+            <Text style={styles.infoTitle}>Sincronizar entre celulares:</Text>
+            <Text style={styles.step}>1. Exporta en el celular origen</Text>
+            <Text style={styles.step}>2. Comparte por WhatsApp/Email/Drive</Text>
+            <Text style={styles.step}>3. Descarga en el celular destino</Text>
+            <Text style={styles.step}>4. Importa el archivo CSV</Text>
           </Card.Content>
         </Card>
 
-        <View style={styles.bottomSpace} />
+        <View style={{height: 40}} />
       </ScrollView>
 
       <Snackbar
-        visible={snackbarVisible}
-        onDismiss={() => setSnackbarVisible(false)}
+        visible={snackVisible}
+        onDismiss={() => setSnackVisible(false)}
         duration={4000}
-        action={{ label: 'OK', onPress: () => setSnackbarVisible(false) }}
+        action={{ label: 'OK', onPress: () => setSnackVisible(false) }}
       >
-        {snackbarMessage}
+        {snackMessage}
       </Snackbar>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 32 },
-  card: { margin: 16, marginBottom: 8, elevation: 2, borderRadius: 12 },
-  successCard: { backgroundColor: '#e8f5e9', borderColor: '#4caf50', borderWidth: 1 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: -8 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16, paddingBottom: 32 },
+  card: { marginBottom: 12, borderRadius: 12, elevation: 2 },
+  successCard: { backgroundColor: '#e8f5e9' },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: -8 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-  successTitle: { fontSize: 18, fontWeight: 'bold', color: '#2e7d32' },
-  description: { fontSize: 14, color: '#666', marginBottom: 12, lineHeight: 20 },
-  bulletList: { marginBottom: 12, paddingLeft: 8 },
-  bulletItem: { fontSize: 13, color: '#666', marginBottom: 4 },
-  button: { marginTop: 8, borderRadius: 8 },
-  buttonContent: { paddingVertical: 6 },
-  statusContainer: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  desc: { fontSize: 14, color: '#666', marginBottom: 12, lineHeight: 20 },
+  note: { fontSize: 13, color: '#666', marginLeft: 8, marginBottom: 4 },
+  btn: { marginTop: 12, borderRadius: 8 },
+  successText: { fontSize: 16, fontWeight: 'bold', color: '#2e7d32', marginTop: 8 },
+  fileText: { fontSize: 12, color: '#666', marginTop: 4 },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   statusText: { fontSize: 14, color: '#666', flex: 1 },
   progressBar: { height: 6, borderRadius: 3 },
-  resultsTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 8 },
+  resultsTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   divider: { marginVertical: 8 },
-  resultNumber: { fontSize: 18, fontWeight: 'bold' },
-  resultHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: -8 },
-  resultText: { fontSize: 14, color: '#2e7d32', marginBottom: 4 },
-  infoTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 16 },
-  stepList: { gap: 12 },
-  step: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  stepNumber: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#6200ee', justifyContent: 'center', alignItems: 'center' },
-  stepNumberText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  stepText: { flex: 1, fontSize: 14, color: '#666', lineHeight: 20, paddingTop: 4 },
-  bottomSpace: { height: 32 },
+  resultRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
+  resultNum: { fontSize: 18, fontWeight: 'bold' },
+  infoTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 12, color: '#333' },
+  step: { fontSize: 14, color: '#666', marginBottom: 6, marginLeft: 8 },
 });
