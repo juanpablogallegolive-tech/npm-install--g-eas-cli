@@ -94,6 +94,7 @@ class Calculo(BaseModel):
     valores_operaciones: Dict[str, float] = {}
     clientes: List[Cliente] = []
     costo_base: float
+    precio_calculado: Optional[float] = None  # Precio después del flujo, antes de ganancia
     fecha: Optional[datetime] = None
 
 class CalculoResponse(Calculo):
@@ -367,7 +368,8 @@ def calcular_precio(request: CalcularPrecioRequest):
         })
     
     return {
-        "costo_base": round(precio_actual, 2),
+        "costo_base": request.costo_base,
+        "precio_calculado": round(precio_actual, 2),  # Precio después del flujo, antes de ganancia
         "resultados": resultados
     }
 

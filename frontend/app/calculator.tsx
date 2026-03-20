@@ -10,7 +10,6 @@ import {
   Modal,
   FlatList,
   Keyboard,
-  TextInput as RNTextInput,
 } from 'react-native';
 import {
   Text,
@@ -35,6 +34,7 @@ export default function CalculatorScreen() {
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   
   const [costoBaseEditable, setCostoBaseEditable] = useState('0');
+  const [precioCalculado, setPrecioCalculado] = useState<number | null>(null); // Precio después del flujo
   
   const [selectedFlujo, setSelectedFlujo] = useState<Flujo | null>(null);
   const [modalFlujoVisible, setModalFlujoVisible] = useState(false);
@@ -56,7 +56,6 @@ export default function CalculatorScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
-  // Manejar visibilidad del teclado
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => {
       setKeyboardVisible(true);
@@ -64,7 +63,6 @@ export default function CalculatorScreen() {
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
     });
-
     return () => {
       showSub.remove();
       hideSub.remove();
@@ -111,6 +109,11 @@ export default function CalculatorScreen() {
     setValoresOperaciones(valores);
   };
 
+  const resetPrecios = () => {
+    setPrecioCalculado(null);
+    setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
+  };
+
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
     if (query.length > 1) {
@@ -136,6 +139,7 @@ export default function CalculatorScreen() {
     setCostoBaseEditable(producto.costo_base.toString());
     setShowResults(false);
     Keyboard.dismiss();
+    resetPrecios();
     
     if (producto.flujo_id) {
       const flujo = flujos.find(f => f._id === producto.flujo_id);
@@ -150,7 +154,7 @@ export default function CalculatorScreen() {
     setSelectedFlujo(flujo);
     setModalFlujoVisible(false);
     initOperaciones(flujo);
-    setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
+    resetPrecios();
   };
 
   const addCliente = () => {
@@ -171,18 +175,10 @@ export default function CalculatorScreen() {
     if (Platform.OS === 'web') {
       setClientes(clientes.filter((_, i) => i !== index));
     } else {
-      Alert.alert(
-        'Confirmar',
-        '¿Eliminar este cliente?',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { 
-            text: 'Eliminar',
-            style: 'destructive',
-            onPress: () => setClientes(clientes.filter((_, i) => i !== index))
-          },
-        ]
-      );
+      Alert.alert('Confirmar', '¿Eliminar este cliente?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: () => setClientes(clientes.filter((_, i) => i !== index)) },
+      ]);
     }
   };
 
@@ -192,7 +188,6 @@ export default function CalculatorScreen() {
     setClientes(newClientes);
   };
 
-  // Función para hacer scroll al input enfocado
   const scrollToInput = (yOffset: number) => {
     if (scrollViewRef.current) {
       scrollViewRef.current.scrollTo({ y: yOffset - 100, animated: true });
@@ -217,12 +212,6 @@ export default function CalculatorScreen() {
       return;
     }
 
-    const clientesSinNombre = clientes.filter(c => !c.nombre.trim());
-    if (clientesSinNombre.length > 0) {
-      Alert.alert('Error', 'Todos los clientes deben tener un nombre');
-      return;
-    }
-
     try {
       setCalculando(true);
       Keyboard.dismiss();
@@ -244,6 +233,9 @@ export default function CalculatorScreen() {
         valores_operaciones: valoresNum,
         clientes: clientesData,
       });
+
+      // Guardar el precio calculado (antes de ganancia)
+      setPrecioCalculado(response.data.precio_calculado);
 
       const newClientes = [...clientes];
       response.data.resultados.forEach((resultado: any, index: number) => {
@@ -271,7 +263,7 @@ export default function CalculatorScreen() {
       return;
     }
 
-    if (clientes[0]?.precio_final === 0) {
+    if (!precioCalculado || clientes[0]?.precio_final === 0) {
       Alert.alert('Error', 'Calcula los precios antes de guardar');
       return;
     }
@@ -298,6 +290,7 @@ export default function CalculatorScreen() {
         valores_operaciones: valoresNum,
         clientes: clientesGuardar,
         costo_base: costoBase,
+        precio_calculado: precioCalculado, // Guardar el precio calculado
       });
 
       Alert.alert('Éxito', 'Cálculo guardado en el historial');
@@ -315,19 +308,18 @@ export default function CalculatorScreen() {
     setSelectedProduct(null);
     setSearchQuery('');
     setCostoBaseEditable('0');
+    setPrecioCalculado(null);
     setClientes([]);
     if (selectedFlujo) {
       initOperaciones(selectedFlujo);
     }
   };
 
-  // Cargar historial
   const abrirHistorial = async () => {
     setModalHistorialVisible(true);
     setLoadingHistorial(true);
     try {
       const response = await calculosApi.getAll();
-      // Ordenar por fecha más reciente
       const sorted = response.data.sort((a: any, b: any) => {
         const dateA = new Date(a.fecha || 0).getTime();
         const dateB = new Date(b.fecha || 0).getTime();
@@ -342,27 +334,21 @@ export default function CalculatorScreen() {
     }
   };
 
-  // Cargar cálculo desde historial - FUNCIÓN CORREGIDA
   const cargarDesdeHistorial = (calculo: Calculo) => {
-    // Cerrar modal primero
     setModalHistorialVisible(false);
     
-    // Pequeño delay para asegurar que el modal se cierre
     setTimeout(() => {
-      // Buscar el flujo por ID o nombre
       let flujoEncontrado = flujos.find(f => f._id === calculo.flujo_id);
       if (!flujoEncontrado) {
         flujoEncontrado = flujos.find(f => f.nombre === calculo.flujo_nombre);
       }
       
-      // Cargar datos del producto
       setSearchQuery(calculo.nombre_producto || '');
       setCostoBaseEditable((calculo.costo_base || 0).toString());
+      setPrecioCalculado(calculo.precio_calculado || null);
       
       if (flujoEncontrado) {
         setSelectedFlujo(flujoEncontrado);
-        
-        // Cargar valores de operaciones
         const valores: Record<string, string> = {};
         flujoEncontrado.operaciones.forEach(op => {
           const valorGuardado = calculo.valores_operaciones?.[op.nombre];
@@ -371,7 +357,6 @@ export default function CalculatorScreen() {
         setValoresOperaciones(valores);
       }
       
-      // Cargar clientes con sus datos
       if (calculo.clientes && calculo.clientes.length > 0) {
         const clientesCargados = calculo.clientes.map(c => ({
           nombre: c.nombre || '',
@@ -384,9 +369,7 @@ export default function CalculatorScreen() {
         setClientes([]);
       }
       
-      Alert.alert('Cargado', 'Datos cargados desde el historial. Puedes modificarlos y recalcular.');
-      
-      // Scroll arriba para ver los datos cargados
+      Alert.alert('Cargado', 'Datos cargados desde el historial');
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }, 300);
   };
@@ -412,22 +395,10 @@ export default function CalculatorScreen() {
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.quickActions}>
-              <Button
-                mode="outlined"
-                onPress={abrirHistorial}
-                icon="history"
-                compact
-                style={styles.quickButton}
-              >
+              <Button mode="outlined" onPress={abrirHistorial} icon="history" compact style={styles.quickButton}>
                 Cargar Historial
               </Button>
-              <Button
-                mode="outlined"
-                onPress={limpiarFormulario}
-                icon="eraser"
-                compact
-                style={styles.quickButton}
-              >
+              <Button mode="outlined" onPress={limpiarFormulario} icon="eraser" compact style={styles.quickButton}>
                 Limpiar
               </Button>
             </View>
@@ -450,11 +421,7 @@ export default function CalculatorScreen() {
               <View style={styles.resultsContainer}>
                 <ScrollView style={styles.resultsScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                   {searchResults.slice(0, 10).map((producto) => (
-                    <TouchableOpacity
-                      key={producto._id}
-                      onPress={() => selectProduct(producto)}
-                      style={styles.resultItem}
-                    >
+                    <TouchableOpacity key={producto._id} onPress={() => selectProduct(producto)} style={styles.resultItem}>
                       <Text style={styles.resultTitle} numberOfLines={1}>{producto.nombre}</Text>
                       <Text style={styles.resultPrice}>${producto.costo_base.toLocaleString()}</Text>
                     </TouchableOpacity>
@@ -469,15 +436,11 @@ export default function CalculatorScreen() {
         <Card style={styles.card}>
           <Card.Content>
             <Text style={styles.sectionTitle}>Costo Base</Text>
-            <Text style={styles.helpText}>Puedes editar el costo base para este cálculo</Text>
             <TextInput
               mode="outlined"
               label="Costo Base ($)"
               value={costoBaseEditable}
-              onChangeText={(text) => {
-                setCostoBaseEditable(text);
-                setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
-              }}
+              onChangeText={(text) => { setCostoBaseEditable(text); resetPrecios(); }}
               keyboardType="numeric"
               style={styles.input}
               left={<TextInput.Affix text="$" />}
@@ -491,28 +454,14 @@ export default function CalculatorScreen() {
           <Card.Content>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Flujo de Cálculo</Text>
-              <IconButton
-                icon="refresh"
-                size={20}
-                onPress={handleRefreshFlujos}
-                style={styles.refreshButton}
-              />
+              <IconButton icon="refresh" size={20} onPress={handleRefreshFlujos} style={styles.refreshButton} />
             </View>
-            <TouchableOpacity
-              style={styles.dropdownButton}
-              onPress={() => {
-                Keyboard.dismiss();
-                setModalFlujoVisible(true);
-              }}
-            >
+            <TouchableOpacity style={styles.dropdownButton} onPress={() => { Keyboard.dismiss(); setModalFlujoVisible(true); }}>
               <Text style={styles.dropdownText} numberOfLines={1}>
                 {selectedFlujo ? selectedFlujo.nombre : 'Seleccionar flujo'}
               </Text>
               <IconButton icon="chevron-down" size={20} style={styles.dropdownIcon} />
             </TouchableOpacity>
-            <Text style={styles.flujosCount}>
-              {flujos.length} flujo(s) disponible(s)
-            </Text>
           </Card.Content>
         </Card>
 
@@ -524,20 +473,12 @@ export default function CalculatorScreen() {
               {selectedFlujo.operaciones.map((operacion, index) => (
                 <View key={`${operacion.nombre}-${index}`} style={styles.inputRow}>
                   <Text style={styles.inputLabel}>{operacion.nombre}</Text>
-                  <Text style={styles.inputSubLabel}>
-                    {operacion.tipo_operacion} - {operacion.tipo_valor}
-                  </Text>
+                  <Text style={styles.inputSubLabel}>{operacion.tipo_operacion} - {operacion.tipo_valor}</Text>
                   <TextInput
                     mode="outlined"
                     keyboardType="numeric"
                     value={valoresOperaciones[operacion.nombre] || '0'}
-                    onChangeText={(text) => {
-                      setValoresOperaciones({
-                        ...valoresOperaciones,
-                        [operacion.nombre]: text,
-                      });
-                      setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
-                    }}
+                    onChangeText={(text) => { setValoresOperaciones({ ...valoresOperaciones, [operacion.nombre]: text }); resetPrecios(); }}
                     style={styles.input}
                     dense
                     onFocus={() => scrollToInput(300 + index * 80)}
@@ -548,19 +489,23 @@ export default function CalculatorScreen() {
           </Card>
         )}
 
+        {/* PRECIO CALCULADO - Antes de ganancia */}
+        {precioCalculado !== null && (
+          <Card style={[styles.card, styles.precioCalculadoCard]}>
+            <Card.Content>
+              <Text style={styles.precioCalculadoLabel}>Precio Calculado (Antes de Ganancia)</Text>
+              <Text style={styles.precioCalculadoValor}>${precioCalculado.toLocaleString('es-CO')}</Text>
+              <Text style={styles.precioCalculadoNota}>Este es el precio después de aplicar el flujo, sin ganancia de cliente</Text>
+            </Card.Content>
+          </Card>
+        )}
+
         {/* Clientes */}
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Clientes</Text>
-              <Button 
-                mode="contained" 
-                onPress={addCliente}
-                icon="plus"
-                compact
-              >
-                Agregar
-              </Button>
+              <Button mode="contained" onPress={addCliente} icon="plus" compact>Agregar</Button>
             </View>
             
             {clientes.length === 0 && (
@@ -571,12 +516,7 @@ export default function CalculatorScreen() {
               <View key={index} style={styles.clienteCard}>
                 <View style={styles.clienteHeader}>
                   <Text style={styles.clienteTitle}>Cliente {index + 1}</Text>
-                  <IconButton
-                    icon="delete"
-                    size={20}
-                    iconColor="#d32f2f"
-                    onPress={() => removeCliente(index)}
-                  />
+                  <IconButton icon="delete" size={20} iconColor="#d32f2f" onPress={() => removeCliente(index)} />
                 </View>
                 
                 <TextInput
@@ -614,10 +554,8 @@ export default function CalculatorScreen() {
                 
                 {cliente.precio_final > 0 && (
                   <View style={styles.resultadoBox}>
-                    <Text style={styles.resultadoLabel}>Precio Final:</Text>
-                    <Text style={styles.resultadoValor}>
-                      ${cliente.precio_final.toLocaleString('es-CO')}
-                    </Text>
+                    <Text style={styles.resultadoLabel}>Precio Final (con ganancia):</Text>
+                    <Text style={styles.resultadoValor}>${cliente.precio_final.toLocaleString('es-CO')}</Text>
                   </View>
                 )}
               </View>
@@ -643,7 +581,7 @@ export default function CalculatorScreen() {
             mode="contained"
             onPress={guardar}
             loading={loading}
-            disabled={clientes.length === 0 || !clientes[0]?.precio_final || loading}
+            disabled={clientes.length === 0 || !precioCalculado || loading}
             style={styles.button}
             icon="content-save"
             buttonColor="#4caf50"
@@ -653,26 +591,16 @@ export default function CalculatorScreen() {
           </Button>
         </View>
 
-        {/* Espacio extra cuando el teclado está visible */}
         <View style={[styles.bottomSpace, keyboardVisible && styles.keyboardSpace]} />
       </ScrollView>
 
       {/* Modal para seleccionar flujo */}
-      <Modal
-        visible={modalFlujoVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalFlujoVisible(false)}
-      >
+      <Modal visible={modalFlujoVisible} transparent animationType="slide" onRequestClose={() => setModalFlujoVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Seleccionar Flujo</Text>
-              <IconButton
-                icon="close"
-                size={24}
-                onPress={() => setModalFlujoVisible(false)}
-              />
+              <IconButton icon="close" size={24} onPress={() => setModalFlujoVisible(false)} />
             </View>
             <Divider />
             <FlatList
@@ -680,54 +608,31 @@ export default function CalculatorScreen() {
               keyExtractor={(item) => item._id}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[
-                    styles.modalItem,
-                    selectedFlujo?._id === item._id && styles.modalItemSelected
-                  ]}
+                  style={[styles.modalItem, selectedFlujo?._id === item._id && styles.modalItemSelected]}
                   onPress={() => selectFlujo(item)}
                 >
                   <View style={styles.modalItemContent}>
-                    <Text style={[
-                      styles.modalItemText,
-                      selectedFlujo?._id === item._id && styles.modalItemTextSelected
-                    ]} numberOfLines={1}>
+                    <Text style={[styles.modalItemText, selectedFlujo?._id === item._id && styles.modalItemTextSelected]} numberOfLines={1}>
                       {item.nombre}
                     </Text>
-                    <Text style={styles.modalItemSubtext}>
-                      {item.operaciones.length} operaciones
-                    </Text>
+                    <Text style={styles.modalItemSubtext}>{item.operaciones.length} operaciones</Text>
                   </View>
-                  {selectedFlujo?._id === item._id && (
-                    <IconButton icon="check" size={20} iconColor="#6200ee" />
-                  )}
+                  {selectedFlujo?._id === item._id && <IconButton icon="check" size={20} iconColor="#6200ee" />}
                 </TouchableOpacity>
               )}
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>No hay flujos creados.</Text>
-                </View>
-              }
+              ListEmptyComponent={<View style={styles.emptyContainer}><Text style={styles.emptyText}>No hay flujos creados.</Text></View>}
             />
           </View>
         </View>
       </Modal>
 
       {/* Modal para cargar desde historial */}
-      <Modal
-        visible={modalHistorialVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalHistorialVisible(false)}
-      >
+      <Modal visible={modalHistorialVisible} transparent animationType="slide" onRequestClose={() => setModalHistorialVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Cargar desde Historial</Text>
-              <IconButton
-                icon="close"
-                size={24}
-                onPress={() => setModalHistorialVisible(false)}
-              />
+              <IconButton icon="close" size={24} onPress={() => setModalHistorialVisible(false)} />
             </View>
             <Divider />
             {loadingHistorial ? (
@@ -740,37 +645,24 @@ export default function CalculatorScreen() {
                 data={historial}
                 keyExtractor={(item) => item._id}
                 renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.historialItem}
-                    onPress={() => cargarDesdeHistorial(item)}
-                  >
+                  <TouchableOpacity style={styles.historialItem} onPress={() => cargarDesdeHistorial(item)}>
                     <View style={styles.historialInfo}>
-                      <Text style={styles.historialProducto} numberOfLines={1}>
-                        {item.nombre_producto}
-                      </Text>
-                      <Text style={styles.historialFlujo}>
-                        Flujo: {item.flujo_nombre}
-                      </Text>
-                      <Text style={styles.historialCosto}>
-                        Costo Base: ${(item.costo_base || 0).toLocaleString()}
-                      </Text>
+                      <Text style={styles.historialProducto} numberOfLines={1}>{item.nombre_producto}</Text>
+                      <Text style={styles.historialFlujo}>Flujo: {item.flujo_nombre}</Text>
+                      <Text style={styles.historialCosto}>Costo Base: ${(item.costo_base || 0).toLocaleString()}</Text>
+                      {item.precio_calculado && (
+                        <Text style={styles.historialPrecioCalc}>Precio Calculado: ${item.precio_calculado.toLocaleString()}</Text>
+                      )}
                       <Text style={styles.historialClientes}>
                         {item.clientes?.length || 0} cliente(s) - ${(item.clientes?.[0]?.precio_final || 0).toLocaleString()}
                       </Text>
-                      {item.fecha && (
-                        <Text style={styles.historialFecha}>
-                          {new Date(item.fecha).toLocaleDateString('es-CO')}
-                        </Text>
-                      )}
                     </View>
                     <IconButton icon="chevron-right" size={24} iconColor="#6200ee" />
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptyContainer}>
-                    <IconButton icon="history" size={48} iconColor="#ccc" />
                     <Text style={styles.emptyText}>No hay cálculos guardados.</Text>
-                    <Text style={styles.emptySubText}>Los cálculos que guardes aparecerán aquí.</Text>
                   </View>
                 }
               />
@@ -783,299 +675,68 @@ export default function CalculatorScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-  card: {
-    margin: 16,
-    marginBottom: 8,
-    elevation: 2,
-    borderRadius: 12,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  quickButton: {
-    flex: 1,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#333',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  helpText: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 8,
-    fontStyle: 'italic',
-  },
-  searchbar: {
-    marginBottom: 8,
-    elevation: 0,
-    backgroundColor: '#f5f5f5',
-  },
-  loader: {
-    marginVertical: 8,
-  },
-  resultsContainer: {
-    maxHeight: 200,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    marginTop: 8,
-  },
-  resultsScroll: {
-    maxHeight: 200,
-  },
-  resultItem: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  resultTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-  },
-  resultPrice: {
-    fontSize: 12,
-    color: '#6200ee',
-    marginTop: 4,
-  },
-  dropdownButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minHeight: 48,
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: '#333',
-    flex: 1,
-  },
-  dropdownIcon: {
-    margin: 0,
-  },
-  refreshButton: {
-    margin: 0,
-  },
-  flujosCount: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  inputRow: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 15,
-    fontWeight: '500',
-    marginBottom: 2,
-    color: '#333',
-  },
-  inputSubLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: '#fff',
-  },
-  inputSmall: {
-    backgroundColor: '#fff',
-    marginBottom: 8,
-  },
-  clienteCard: {
-    backgroundColor: '#fafafa',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  clienteHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  clienteTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#6200ee',
-  },
-  resultadoBox: {
-    backgroundColor: '#e8f5e9',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  resultadoLabel: {
-    fontSize: 14,
-    color: '#2e7d32',
-    fontWeight: '500',
-  },
-  resultadoValor: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1b5e20',
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#999',
-    paddingVertical: 16,
-    fontSize: 14,
-  },
-  emptySubText: {
-    textAlign: 'center',
-    color: '#aaa',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  buttonContainer: {
-    padding: 16,
-    gap: 12,
-  },
-  button: {
-    borderRadius: 8,
-  },
-  buttonContent: {
-    paddingVertical: 6,
-  },
-  bottomSpace: {
-    height: 32,
-  },
-  keyboardSpace: {
-    height: 150,
-  },
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '75%',
-    paddingBottom: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  modalItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  modalItemSelected: {
-    backgroundColor: '#f0e6ff',
-  },
-  modalItemContent: {
-    flex: 1,
-  },
-  modalItemText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  modalItemTextSelected: {
-    color: '#6200ee',
-    fontWeight: '500',
-  },
-  modalItemSubtext: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  emptyContainer: {
-    padding: 32,
-    alignItems: 'center',
-  },
-  loaderContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  loaderText: {
-    marginTop: 12,
-    color: '#666',
-  },
-  // Historial styles
-  historialItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  historialInfo: {
-    flex: 1,
-    paddingRight: 8,
-  },
-  historialProducto: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  historialFlujo: {
-    fontSize: 13,
-    color: '#6200ee',
-    marginTop: 2,
-  },
-  historialCosto: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
-  },
-  historialClientes: {
-    fontSize: 13,
-    color: '#2e7d32',
-    marginTop: 2,
-  },
-  historialFecha: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 4,
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingBottom: 20 },
+  card: { margin: 16, marginBottom: 8, elevation: 2, borderRadius: 12 },
+  quickActions: { flexDirection: 'row', gap: 8 },
+  quickButton: { flex: 1 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12, color: '#333' },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  searchbar: { marginBottom: 8, elevation: 0, backgroundColor: '#f5f5f5' },
+  loader: { marginVertical: 8 },
+  resultsContainer: { maxHeight: 200, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginTop: 8 },
+  resultsScroll: { maxHeight: 200 },
+  resultItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  resultTitle: { fontSize: 14, fontWeight: '500', color: '#333' },
+  resultPrice: { fontSize: 12, color: '#6200ee', marginTop: 4 },
+  dropdownButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f5f5', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48 },
+  dropdownText: { fontSize: 16, color: '#333', flex: 1 },
+  dropdownIcon: { margin: 0 },
+  refreshButton: { margin: 0 },
+  inputRow: { marginBottom: 16 },
+  inputLabel: { fontSize: 15, fontWeight: '500', marginBottom: 2, color: '#333' },
+  inputSubLabel: { fontSize: 12, color: '#666', marginBottom: 6 },
+  input: { backgroundColor: '#fff' },
+  inputSmall: { backgroundColor: '#fff', marginBottom: 8 },
+  // Precio Calculado Card
+  precioCalculadoCard: { backgroundColor: '#e3f2fd', borderColor: '#2196f3', borderWidth: 1 },
+  precioCalculadoLabel: { fontSize: 14, color: '#1565c0', marginBottom: 4 },
+  precioCalculadoValor: { fontSize: 28, fontWeight: 'bold', color: '#0d47a1' },
+  precioCalculadoNota: { fontSize: 11, color: '#1976d2', marginTop: 4, fontStyle: 'italic' },
+  // Clientes
+  clienteCard: { backgroundColor: '#fafafa', padding: 12, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: '#e0e0e0' },
+  clienteHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  clienteTitle: { fontSize: 16, fontWeight: 'bold', color: '#6200ee' },
+  resultadoBox: { backgroundColor: '#e8f5e9', padding: 12, borderRadius: 8, marginTop: 8 },
+  resultadoLabel: { fontSize: 12, color: '#2e7d32', marginBottom: 4 },
+  resultadoValor: { fontSize: 20, fontWeight: 'bold', color: '#1b5e20' },
+  emptyText: { textAlign: 'center', color: '#999', paddingVertical: 16, fontSize: 14 },
+  buttonContainer: { padding: 16, gap: 12 },
+  button: { borderRadius: 8 },
+  buttonContent: { paddingVertical: 6 },
+  bottomSpace: { height: 32 },
+  keyboardSpace: { height: 150 },
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '75%', paddingBottom: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  modalItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  modalItemSelected: { backgroundColor: '#f0e6ff' },
+  modalItemContent: { flex: 1 },
+  modalItemText: { fontSize: 16, color: '#333' },
+  modalItemTextSelected: { color: '#6200ee', fontWeight: '500' },
+  modalItemSubtext: { fontSize: 12, color: '#666', marginTop: 2 },
+  emptyContainer: { padding: 32, alignItems: 'center' },
+  loaderContainer: { padding: 40, alignItems: 'center' },
+  loaderText: { marginTop: 12, color: '#666' },
+  // Historial
+  historialItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  historialInfo: { flex: 1, paddingRight: 8 },
+  historialProducto: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  historialFlujo: { fontSize: 13, color: '#6200ee', marginTop: 2 },
+  historialCosto: { fontSize: 13, color: '#666', marginTop: 2 },
+  historialPrecioCalc: { fontSize: 13, color: '#1565c0', marginTop: 2, fontWeight: '500' },
+  historialClientes: { fontSize: 13, color: '#2e7d32', marginTop: 2 },
 });

@@ -37,6 +37,7 @@ export interface Calculo {
   valores_operaciones: Record<string, number>;
   clientes: Cliente[];
   costo_base: number;
+  precio_calculado?: number;  // Precio después del flujo, antes de ganancia
   fecha?: string;
 }
 
