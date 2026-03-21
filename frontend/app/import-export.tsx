@@ -99,9 +99,7 @@ export default function ImportExportScreen() {
         // Escribir en directorio de documentos de la app (siempre accesible)
         const filePath = `${FileSystem.documentDirectory}${fileName}`;
         
-        await FileSystem.writeAsStringAsync(filePath, '\uFEFF' + csvContent, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
+        await FileSystem.writeAsStringAsync(filePath, '\uFEFF' + csvContent);
 
         setProgress(0.85);
         setStatus('Abriendo compartir...');
