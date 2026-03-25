@@ -19,6 +19,7 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 import { productosApi } from '../services/api';
 
 export default function ImportExportScreen() {
@@ -41,14 +42,33 @@ export default function ImportExportScreen() {
     setSnackVisible(true);
   };
 
-  // Crear contenido CSV
-  const createCSV = (productos: any[]): string => {
-    let csv = 'Nombre,Costo_Original,Costo_Base\n';
-    productos.forEach((p) => {
-      const nombre = String(p.nombre || '').replace(/"/g, '""').replace(/,/g, ' ');
-      csv += `"${nombre}",${p.costo_original || 0},${p.costo_base || 0}\n`;
-    });
-    return csv;
+  // Crear archivo Excel con columnas separadas
+  const createExcelFile = (productos: any[]): string => {
+    // Crear datos para el Excel con columnas separadas
+    const data = productos.map((p) => ({
+      'Nombre': String(p.nombre || ''),
+      'Costo_Original': p.costo_original || 0,
+      'Costo_Base': p.costo_base || 0,
+      'Comentarios': String(p.comentarios || ''),
+    }));
+
+    // Crear workbook y worksheet
+    const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Ajustar ancho de columnas
+    ws['!cols'] = [
+      { wch: 40 }, // Nombre
+      { wch: 15 }, // Costo_Original
+      { wch: 15 }, // Costo_Base
+      { wch: 30 }, // Comentarios
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Productos');
+
+    // Generar como base64
+    const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+    return wbout;
   };
 
   // ========== EXPORTAR ==========
@@ -71,15 +91,20 @@ export default function ImportExportScreen() {
       setProgress(0.4);
       setStatus(`Preparando ${productos.length} productos...`);
 
-      // 2. Crear CSV
-      const csvContent = createCSV(productos);
-      const fileName = `productos_${Date.now()}.csv`;
+      // 2. Crear Excel
+      const excelBase64 = createExcelFile(productos);
+      const fileName = `productos_${Date.now()}.xlsx`;
 
       setProgress(0.6);
 
       if (Platform.OS === 'web') {
         // WEB: Descargar directamente
-        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const binary = atob(excelBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -90,33 +115,31 @@ export default function ImportExportScreen() {
         window.URL.revokeObjectURL(url);
         
         setExportResult({ total: productos.length });
-        showSnack('Archivo descargado');
+        showSnack('Archivo Excel descargado');
       } else {
-        // MÓVIL: Usar Sharing (funciona en Expo Go y builds)
-        setStatus('Preparando archivo...');
+        // MÓVIL: Usar Sharing
+        setStatus('Preparando archivo Excel...');
         setProgress(0.7);
 
-        // Escribir en directorio de documentos de la app (siempre accesible)
         const filePath = `${FileSystem.documentDirectory}${fileName}`;
         
-        await FileSystem.writeAsStringAsync(filePath, '\uFEFF' + csvContent);
+        await FileSystem.writeAsStringAsync(filePath, excelBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
 
         setProgress(0.85);
         setStatus('Abriendo compartir...');
 
-        // Verificar si sharing está disponible
         const isAvailable = await Sharing.isAvailableAsync();
         
         if (isAvailable) {
-          // Abrir menú de compartir - permite guardar, enviar por WhatsApp, etc.
           await Sharing.shareAsync(filePath, {
-            mimeType: 'text/csv',
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             dialogTitle: 'Guardar o compartir productos',
-            UTI: 'public.comma-separated-values-text',
           });
           
           setExportResult({ total: productos.length });
-          showSnack(`${productos.length} productos listos para guardar`);
+          showSnack(`${productos.length} productos exportados a Excel`);
         } else {
           Alert.alert('Error', 'No se puede compartir en este dispositivo');
         }
@@ -145,7 +168,12 @@ export default function ImportExportScreen() {
     try {
       // 1. Seleccionar archivo
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'text/plain', '*/*'],
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv',
+          '*/*'
+        ],
         copyToCacheDirectory: true,
       });
 
@@ -154,77 +182,126 @@ export default function ImportExportScreen() {
       }
 
       const file = result.assets[0];
+      const fileName = file.name || '';
+      const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+      
       setStatus('Leyendo archivo...');
       setProgress(0.2);
 
-      // 2. Leer contenido
-      let content: string;
-      
-      if (Platform.OS === 'web') {
-        const response = await fetch(file.uri);
-        content = await response.text();
+      let productos: { nombre: string; costo_original: number; costo_base: number }[] = [];
+
+      if (isExcel) {
+        // Leer archivo Excel
+        let fileContent: string;
+        
+        if (Platform.OS === 'web') {
+          const response = await fetch(file.uri);
+          const arrayBuffer = await response.arrayBuffer();
+          const wb = XLSX.read(arrayBuffer, { type: 'array' });
+          const wsName = wb.SheetNames[0];
+          const ws = wb.Sheets[wsName];
+          const jsonData = XLSX.utils.sheet_to_json(ws);
+          
+          productos = jsonData.map((row: any) => ({
+            nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
+            costo_original: parseFloat(row['Costo_Original'] || row['costo_original'] || row['COSTO_ORIGINAL'] || 0) || 0,
+            costo_base: parseFloat(row['Costo_Base'] || row['costo_base'] || row['COSTO_BASE'] || row['Precio'] || 0) || 0,
+          }));
+        } else {
+          fileContent = await FileSystem.readAsStringAsync(file.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          
+          const wb = XLSX.read(fileContent, { type: 'base64' });
+          const wsName = wb.SheetNames[0];
+          const ws = wb.Sheets[wsName];
+          const jsonData = XLSX.utils.sheet_to_json(ws);
+          
+          productos = jsonData.map((row: any) => ({
+            nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
+            costo_original: parseFloat(row['Costo_Original'] || row['costo_original'] || row['COSTO_ORIGINAL'] || 0) || 0,
+            costo_base: parseFloat(row['Costo_Base'] || row['costo_base'] || row['COSTO_BASE'] || row['Precio'] || 0) || 0,
+          }));
+        }
       } else {
-        content = await FileSystem.readAsStringAsync(file.uri, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
+        // Leer CSV (mantener compatibilidad)
+        let content: string;
+        
+        if (Platform.OS === 'web') {
+          const response = await fetch(file.uri);
+          content = await response.text();
+        } else {
+          content = await FileSystem.readAsStringAsync(file.uri);
+        }
+
+        // Quitar BOM
+        if (content.charCodeAt(0) === 0xFEFF) {
+          content = content.slice(1);
+        }
+
+        const lines = content.split(/\r?\n/).filter(l => l.trim());
+        
+        if (lines.length < 2) {
+          Alert.alert('Error', 'Archivo vacío');
+          return;
+        }
+
+        const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+        const iNombre = header.findIndex(h => h.includes('nombre') || h.includes('name'));
+        const iCostoBase = header.findIndex(h => h.includes('base') || h.includes('precio'));
+        const iCostoOrig = header.findIndex(h => h.includes('original'));
+
+        if (iNombre === -1) {
+          Alert.alert('Error', 'No se encontró columna Nombre');
+          return;
+        }
+
+        for (let i = 1; i < lines.length; i++) {
+          const cols = parseCSVLine(lines[i]);
+          const nombre = (cols[iNombre] || '').trim();
+          if (nombre) {
+            productos.push({
+              nombre,
+              costo_original: parseFloat(cols[iCostoOrig] || cols[iCostoBase] || '0') || 0,
+              costo_base: parseFloat(cols[iCostoBase] || cols[iCostoOrig] || '0') || 0,
+            });
+          }
+        }
       }
 
-      // Quitar BOM
-      if (content.charCodeAt(0) === 0xFEFF) {
-        content = content.slice(1);
-      }
-
-      // 3. Parsear
-      const lines = content.split(/\r?\n/).filter(l => l.trim());
-      
-      if (lines.length < 2) {
-        Alert.alert('Error', 'Archivo vacío');
+      if (productos.length === 0) {
+        Alert.alert('Error', 'No se encontraron productos en el archivo');
         return;
       }
 
       setProgress(0.3);
+      setStatus(`Procesando ${productos.length} productos...`);
 
-      // Header
-      const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-      const iNombre = header.findIndex(h => h.includes('nombre') || h.includes('name') || h.includes('producto'));
-      const iCostoBase = header.findIndex(h => h.includes('base') || h.includes('precio') || h.includes('costo'));
-      const iCostoOrig = header.findIndex(h => h.includes('original'));
-
-      if (iNombre === -1) {
-        Alert.alert('Error', 'No se encontró columna Nombre');
-        return;
-      }
-
-      // 4. Productos existentes
-      setStatus('Verificando existentes...');
+      // Productos existentes
       const existingRes = await productosApi.getAll();
       const existingMap = new Map<string, any>();
       existingRes.data.forEach((p: any) => {
         existingMap.set(p.nombre.toLowerCase().trim(), p);
       });
 
-      // 5. Procesar
+      // Procesar
       let nuevos = 0, actualizados = 0, sinCambios = 0, errores = 0;
-      const total = lines.length - 1;
+      const total = productos.length;
 
-      for (let i = 1; i < lines.length; i++) {
+      for (let i = 0; i < productos.length; i++) {
         try {
-          const cols = parseCSVLine(lines[i]);
-          const nombre = (cols[iNombre] || '').trim();
+          const { nombre, costo_original, costo_base } = productos[i];
           
           if (!nombre) { errores++; continue; }
-
-          const costoBase = parseFloat(cols[iCostoBase] || cols[iCostoOrig] || '0') || 0;
-          const costoOrig = parseFloat(cols[iCostoOrig] || cols[iCostoBase] || '0') || costoBase;
 
           const existing = existingMap.get(nombre.toLowerCase().trim());
 
           if (existing) {
-            if (Math.abs(existing.costo_base - costoBase) > 0.01) {
+            if (Math.abs(existing.costo_base - costo_base) > 0.01) {
               await productosApi.update(existing._id, {
                 ...existing,
-                costo_base: costoBase,
-                costo_original: costoOrig,
+                costo_base,
+                costo_original,
                 comentarios: (existing.comentarios || '') + `\n[Actualizado: ${new Date().toLocaleDateString()}]`,
               });
               actualizados++;
@@ -232,7 +309,7 @@ export default function ImportExportScreen() {
               sinCambios++;
             }
           } else {
-            await productosApi.create({ nombre, costo_original: costoOrig, costo_base: costoBase, comentarios: '' });
+            await productosApi.create({ nombre, costo_original, costo_base, comentarios: '' });
             nuevos++;
           }
 
@@ -248,7 +325,8 @@ export default function ImportExportScreen() {
       Alert.alert('Listo', `Nuevos: ${nuevos}\nActualizados: ${actualizados}\nSin cambios: ${sinCambios}`);
       
     } catch (error: any) {
-      Alert.alert('Error', 'No se pudo importar');
+      console.error('Error importar:', error);
+      Alert.alert('Error', 'No se pudo importar: ' + (error?.message || ''));
     } finally {
       setLoading(false);
       setStatus('');
@@ -279,9 +357,9 @@ export default function ImportExportScreen() {
               <List.Icon icon="download" color="#6200ee" />
               <Text style={styles.title}>Exportar</Text>
             </View>
-            <Text style={styles.desc}>Guarda todos los productos en un archivo CSV</Text>
+            <Text style={styles.desc}>Guarda todos los productos en un archivo Excel (.xlsx)</Text>
             <Button mode="contained" onPress={exportarDatos} loading={loading && status.includes('Cargando')} disabled={loading} icon="file-export" style={styles.btn}>
-              Exportar CSV
+              Exportar Excel
             </Button>
           </Card.Content>
         </Card>
@@ -300,11 +378,11 @@ export default function ImportExportScreen() {
               <List.Icon icon="upload" color="#4caf50" />
               <Text style={styles.title}>Importar</Text>
             </View>
-            <Text style={styles.desc}>Carga productos desde un archivo CSV</Text>
+            <Text style={styles.desc}>Carga productos desde Excel (.xlsx) o CSV</Text>
             <Text style={styles.note}>• Nuevos se agregan</Text>
             <Text style={styles.note}>• Existentes se actualizan si el precio cambió</Text>
             <Button mode="contained" onPress={importarDatos} loading={loading && status.includes('/')} disabled={loading} icon="file-import" style={styles.btn} buttonColor="#4caf50">
-              Importar CSV
+              Importar Excel/CSV
             </Button>
           </Card.Content>
         </Card>
