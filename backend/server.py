@@ -177,7 +177,7 @@ def count_productos():
     return {"total": total}
 
 @app.get("/api/productos/buscar")
-def buscar_productos(q: str, limit: int = 50):
+def buscar_productos(q: str, limit: int = 200):
     regex = {"$regex": q, "$options": "i"}
     productos = list(productos_col.find({"nombre": regex}).limit(limit))
     return [serialize_doc(p) for p in productos]

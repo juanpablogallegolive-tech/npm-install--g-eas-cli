@@ -116,7 +116,7 @@ export default function CalculatorScreen() {
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
-    if (query.length > 1) {
+    if (query.length >= 1) {
       try {
         setLoading(true);
         const response = await productosApi.search(query);
@@ -420,9 +420,9 @@ export default function CalculatorScreen() {
             {showResults && searchResults.length > 0 && (
               <View style={styles.resultsContainer}>
                 <ScrollView style={styles.resultsScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                  {searchResults.slice(0, 10).map((producto) => (
+                  {searchResults.map((producto) => (
                     <TouchableOpacity key={producto._id} onPress={() => selectProduct(producto)} style={styles.resultItem}>
-                      <Text style={styles.resultTitle} numberOfLines={1}>{producto.nombre}</Text>
+                      <Text style={styles.resultTitle} numberOfLines={2}>{producto.nombre}</Text>
                       <Text style={styles.resultPrice}>${producto.costo_base.toLocaleString()}</Text>
                     </TouchableOpacity>
                   ))}
@@ -685,8 +685,8 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   searchbar: { marginBottom: 8, elevation: 0, backgroundColor: '#f5f5f5' },
   loader: { marginVertical: 8 },
-  resultsContainer: { maxHeight: 200, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginTop: 8 },
-  resultsScroll: { maxHeight: 200 },
+  resultsContainer: { maxHeight: 350, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginTop: 8 },
+  resultsScroll: { maxHeight: 350 },
   resultItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   resultTitle: { fontSize: 14, fontWeight: '500', color: '#333' },
   resultPrice: { fontSize: 12, color: '#6200ee', marginTop: 4 },
