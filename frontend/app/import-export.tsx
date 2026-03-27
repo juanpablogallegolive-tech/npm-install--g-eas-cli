@@ -20,7 +20,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
-import { productosApi } from '../services/api';
+import { productosApi, calculosApi, flujosApi } from '../services/api';
 
 export default function ImportExportScreen() {
   const [loading, setLoading] = useState(false);
@@ -75,58 +75,137 @@ export default function ImportExportScreen() {
   const exportarDatos = async () => {
     setLoading(true);
     setProgress(0);
-    setStatus('Preparando archivo...');
+    setStatus('Cargando datos...');
     setExportResult(null);
     
     try {
-      // 1. Cargar productos
-      const response = await productosApi.getAll();
-      const productos = response.data;
-
-      setProgress(0.4);
-
-      // 2. Crear datos para Excel
-      let data: any[];
-      let totalProductos: number;
+      // Cargar todos los datos
+      const [productosRes, historialRes, flujosRes] = await Promise.all([
+        productosApi.getAll(),
+        calculosApi.getAll(),
+        flujosApi.getAll(),
+      ]);
       
-      if (!productos || productos.length === 0) {
-        // Si no hay productos, crear plantilla con ejemplo
-        data = [{
-          'Nombre': 'PRODUCTO EJEMPLO (borrar esta fila)',
+      const productos = productosRes.data || [];
+      const historial = historialRes.data || [];
+      const flujos = flujosRes.data || [];
+
+      setProgress(0.3);
+      setStatus('Preparando Excel...');
+
+      const wb = XLSX.utils.book_new();
+
+      // HOJA 1: Productos
+      let productosData: any[];
+      if (productos.length === 0) {
+        productosData = [{
+          'Nombre': 'PRODUCTO EJEMPLO (borrar)',
           'Costo_Original': 1000,
           'Costo_Base': 1200,
-          'Comentarios': 'Este es un ejemplo. Agrega tus productos aquí.',
+          'Comentarios': 'Ejemplo',
         }];
-        totalProductos = 0;
-        setStatus('Creando plantilla de ejemplo...');
       } else {
-        data = productos.map((p: any) => ({
+        productosData = productos.map((p: any) => ({
           'Nombre': String(p.nombre || ''),
           'Costo_Original': p.costo_original || 0,
           'Costo_Base': p.costo_base || 0,
           'Comentarios': String(p.comentarios || ''),
         }));
-        totalProductos = productos.length;
-        setStatus(`Preparando ${totalProductos} productos...`);
       }
+      const wsProductos = XLSX.utils.json_to_sheet(productosData);
+      wsProductos['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }];
+      XLSX.utils.book_append_sheet(wb, wsProductos, 'Productos');
 
-      setProgress(0.6);
+      setProgress(0.5);
 
-      // 3. Crear Excel
-      const ws = XLSX.utils.json_to_sheet(data);
-      ws['!cols'] = [
-        { wch: 40 }, // Nombre
-        { wch: 15 }, // Costo_Original
-        { wch: 15 }, // Costo_Base
-        { wch: 30 }, // Comentarios
-      ];
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Productos');
-      const excelBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const fileName = `productos_${Date.now()}.xlsx`;
+      // HOJA 2: Historial
+      let historialData: any[];
+      if (historial.length === 0) {
+        historialData = [{
+          'Producto': 'EJEMPLO',
+          'Flujo': 'Flujo ejemplo',
+          'Costo_Base': 0,
+          'Precio_Calculado': 0,
+          'Cliente': 'Cliente ejemplo',
+          'Ganancia_%': 0,
+          'Precio_Final': 0,
+          'Fecha': '',
+        }];
+      } else {
+        historialData = [];
+        historial.forEach((h: any) => {
+          if (h.clientes && h.clientes.length > 0) {
+            h.clientes.forEach((c: any) => {
+              historialData.push({
+                'Producto': h.nombre_producto || '',
+                'Flujo': h.flujo_nombre || '',
+                'Costo_Base': h.costo_base || 0,
+                'Precio_Calculado': h.precio_calculado || 0,
+                'Cliente': c.nombre || '',
+                'Ganancia_%': c.porcentaje_ganancia || 0,
+                'Precio_Final': c.precio_final || 0,
+                'Fecha': h.fecha || '',
+              });
+            });
+          } else {
+            historialData.push({
+              'Producto': h.nombre_producto || '',
+              'Flujo': h.flujo_nombre || '',
+              'Costo_Base': h.costo_base || 0,
+              'Precio_Calculado': h.precio_calculado || 0,
+              'Cliente': '',
+              'Ganancia_%': 0,
+              'Precio_Final': 0,
+              'Fecha': h.fecha || '',
+            });
+          }
+        });
+      }
+      const wsHistorial = XLSX.utils.json_to_sheet(historialData);
+      wsHistorial['!cols'] = [{ wch: 35 }, { wch: 20 }, { wch: 12 }, { wch: 15 }, { wch: 20 }, { wch: 12 }, { wch: 15 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, wsHistorial, 'Historial');
 
       setProgress(0.7);
+
+      // HOJA 3: Flujos
+      let flujosData: any[];
+      if (flujos.length === 0) {
+        flujosData = [{
+          'Nombre_Flujo': 'FLUJO EJEMPLO',
+          'Operacion': 'Operacion ejemplo',
+          'Tipo_Operacion': 'suma',
+          'Tipo_Valor': 'porcentaje',
+        }];
+      } else {
+        flujosData = [];
+        flujos.forEach((f: any) => {
+          if (f.operaciones && f.operaciones.length > 0) {
+            f.operaciones.forEach((op: any) => {
+              flujosData.push({
+                'Nombre_Flujo': f.nombre || '',
+                'Operacion': op.nombre || '',
+                'Tipo_Operacion': op.tipo_operacion || '',
+                'Tipo_Valor': op.tipo_valor || '',
+              });
+            });
+          } else {
+            flujosData.push({
+              'Nombre_Flujo': f.nombre || '',
+              'Operacion': '',
+              'Tipo_Operacion': '',
+              'Tipo_Valor': '',
+            });
+          }
+        });
+      }
+      const wsFlujos = XLSX.utils.json_to_sheet(flujosData);
+      wsFlujos['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 15 }];
+      XLSX.utils.book_append_sheet(wb, wsFlujos, 'Flujos');
+
+      setProgress(0.8);
+
+      const excelBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const fileName = `datos_completos_${Date.now()}.xlsx`;
 
       if (Platform.OS === 'web') {
         const binary = atob(excelBase64);
@@ -144,33 +223,25 @@ export default function ImportExportScreen() {
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
         
-        setExportResult({ total: totalProductos });
-        showSnack(totalProductos > 0 ? 'Archivo Excel descargado' : 'Plantilla descargada');
+        setExportResult({ total: productos.length });
+        showSnack('Datos exportados');
       } else {
-        setStatus('Preparando archivo Excel...');
-        setProgress(0.8);
-
+        setStatus('Guardando archivo...');
         const filePath = `${FileSystem.documentDirectory}${fileName}`;
-        
         await FileSystem.writeAsStringAsync(filePath, excelBase64, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        setProgress(0.9);
-        setStatus('Abriendo compartir...');
-
+        setProgress(0.95);
         const isAvailable = await Sharing.isAvailableAsync();
         
         if (isAvailable) {
           await Sharing.shareAsync(filePath, {
             mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            dialogTitle: 'Guardar o compartir productos',
+            dialogTitle: 'Guardar datos',
           });
-          
-          setExportResult({ total: totalProductos });
-          showSnack(totalProductos > 0 ? `${totalProductos} productos exportados` : 'Plantilla exportada');
-        } else {
-          Alert.alert('Error', 'No se puede compartir en este dispositivo');
+          setExportResult({ total: productos.length });
+          showSnack(`Exportado: ${productos.length} productos, ${historial.length} cálculos, ${flujos.length} flujos`);
         }
       }
 
