@@ -84,8 +84,10 @@ export default function QuotesScreen() {
 
   const actualizarCantidad = (index: number, cantidad: string) => {
     const newItems = [...items];
+    // Permitir decimales: reemplazar coma por punto
+    const cantidadNormalizada = cantidad.replace(',', '.');
     newItems[index].cantidad = cantidad;
-    const cant = parseFloat(cantidad) || 0;
+    const cant = parseFloat(cantidadNormalizada) || 0;
     const precio = newItems[index].producto?.costo_base || 0;
     newItems[index].subtotal = cant * precio;
     setItems(newItems);
