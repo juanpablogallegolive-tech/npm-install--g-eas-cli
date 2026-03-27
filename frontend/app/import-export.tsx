@@ -75,30 +75,60 @@ export default function ImportExportScreen() {
   const exportarDatos = async () => {
     setLoading(true);
     setProgress(0);
-    setStatus('Cargando productos...');
+    setStatus('Preparando archivo...');
     setExportResult(null);
     
     try {
       // 1. Cargar productos
       const response = await productosApi.getAll();
       const productos = response.data;
-      
-      if (!productos || productos.length === 0) {
-        Alert.alert('Info', 'No hay productos para exportar');
-        return;
-      }
 
       setProgress(0.4);
-      setStatus(`Preparando ${productos.length} productos...`);
 
-      // 2. Crear Excel
-      const excelBase64 = createExcelFile(productos);
-      const fileName = `productos_${Date.now()}.xlsx`;
+      // 2. Crear datos para Excel
+      let data: any[];
+      let totalProductos: number;
+      
+      if (!productos || productos.length === 0) {
+        // Si no hay productos, crear plantilla con ejemplo
+        data = [{
+          'Nombre': 'PRODUCTO EJEMPLO (borrar esta fila)',
+          'Costo_Original': 1000,
+          'Costo_Base': 1200,
+          'Comentarios': 'Este es un ejemplo. Agrega tus productos aquí.',
+        }];
+        totalProductos = 0;
+        setStatus('Creando plantilla de ejemplo...');
+      } else {
+        data = productos.map((p: any) => ({
+          'Nombre': String(p.nombre || ''),
+          'Costo_Original': p.costo_original || 0,
+          'Costo_Base': p.costo_base || 0,
+          'Comentarios': String(p.comentarios || ''),
+        }));
+        totalProductos = productos.length;
+        setStatus(`Preparando ${totalProductos} productos...`);
+      }
 
       setProgress(0.6);
 
+      // 3. Crear Excel
+      const ws = XLSX.utils.json_to_sheet(data);
+      ws['!cols'] = [
+        { wch: 40 }, // Nombre
+        { wch: 15 }, // Costo_Original
+        { wch: 15 }, // Costo_Base
+        { wch: 30 }, // Comentarios
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Productos');
+      const excelBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const fileName = `productos_${Date.now()}.xlsx`;
+
+      setProgress(0.7);
+
       if (Platform.OS === 'web') {
-        // WEB: Descargar directamente
         const binary = atob(excelBase64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) {
@@ -114,12 +144,11 @@ export default function ImportExportScreen() {
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
         
-        setExportResult({ total: productos.length });
-        showSnack('Archivo Excel descargado');
+        setExportResult({ total: totalProductos });
+        showSnack(totalProductos > 0 ? 'Archivo Excel descargado' : 'Plantilla descargada');
       } else {
-        // MÓVIL: Usar Sharing
         setStatus('Preparando archivo Excel...');
-        setProgress(0.7);
+        setProgress(0.8);
 
         const filePath = `${FileSystem.documentDirectory}${fileName}`;
         
@@ -127,7 +156,7 @@ export default function ImportExportScreen() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        setProgress(0.85);
+        setProgress(0.9);
         setStatus('Abriendo compartir...');
 
         const isAvailable = await Sharing.isAvailableAsync();
@@ -138,8 +167,8 @@ export default function ImportExportScreen() {
             dialogTitle: 'Guardar o compartir productos',
           });
           
-          setExportResult({ total: productos.length });
-          showSnack(`${productos.length} productos exportados a Excel`);
+          setExportResult({ total: totalProductos });
+          showSnack(totalProductos > 0 ? `${totalProductos} productos exportados` : 'Plantilla exportada');
         } else {
           Alert.alert('Error', 'No se puede compartir en este dispositivo');
         }
