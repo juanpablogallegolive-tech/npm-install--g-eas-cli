@@ -579,6 +579,12 @@ export default function QuotesScreen() {
             {items.length === 0 && (
               <Text style={styles.emptyText}>Presiona + para agregar productos</Text>
             )}
+
+            {items.length > 0 && (
+              <Button mode="outlined" onPress={agregarFila} icon="plus" style={{ marginTop: 8 }}>
+                Agregar otro producto
+              </Button>
+            )}
           </Card.Content>
         </Card>
 
