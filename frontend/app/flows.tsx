@@ -18,7 +18,7 @@ import {
   Divider,
   ActivityIndicator,
 } from 'react-native-paper';
-import { flujosApi } from '../services/api';
+import { localFlujosApi } from '../services/localStorage';
 import { Flujo, Operacion } from '../types/types';
 import { useStore } from '../store/store';
 
@@ -76,7 +76,7 @@ export default function FlowsScreen() {
           onPress: async () => {
             try {
               setSaving(true);
-              await flujosApi.delete(selectedFlujo._id);
+              await localFlujosApi.delete(selectedFlujo._id);
               removeFlujo(selectedFlujo._id);
               Alert.alert('Éxito', 'Flujo eliminado');
               nuevoFlujo();
@@ -116,7 +116,7 @@ export default function FlowsScreen() {
       };
 
       if (selectedFlujo) {
-        await flujosApi.update(selectedFlujo._id, flujoData);
+        await localFlujosApi.update(selectedFlujo._id, flujoData);
         const updatedFlujo: Flujo = {
           ...selectedFlujo,
           ...flujoData,
@@ -126,7 +126,7 @@ export default function FlowsScreen() {
         setSelectedFlujo(updatedFlujo);
         Alert.alert('Éxito', 'Flujo actualizado correctamente');
       } else {
-        const response = await flujosApi.create(flujoData);
+        const newFlujo = await localFlujosApi.create(flujoData);
         const newFlujo = response.data;
         addFlujo(newFlujo);
         setSelectedFlujo(newFlujo);
