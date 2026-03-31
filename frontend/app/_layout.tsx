@@ -103,6 +103,15 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
+          name="quotes-client"
+          options={{
+            title: 'Cotizar C',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons name="account-cash" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="import-export"
           options={{
             title: 'Importar',
