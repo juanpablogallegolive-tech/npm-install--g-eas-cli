@@ -1,11 +1,6 @@
 import { create } from 'zustand';
 import { Producto, Flujo, Calculo, Cotizacion } from '../types/types';
-import { 
-  localProductosApi, 
-  localFlujosApi, 
-  localCalculosApi, 
-  localCotizacionesApi 
-} from '../services/localStorage';
+import { flujosApi, productosApi, calculosApi, cotizacionesApi } from '../services/api';
 
 interface AppState {
   // Data
@@ -38,9 +33,6 @@ interface AppState {
   // Async actions - Calculos
   fetchCalculos: () => Promise<void>;
   
-  // Async actions - Cotizaciones
-  fetchCotizaciones: () => Promise<void>;
-  
   // Version tracker for forcing re-renders
   flujosVersion: number;
   incrementFlujosVersion: () => void;
@@ -67,12 +59,12 @@ export const useStore = create<AppState>((set, get) => ({
   // Version incrementer for forcing updates
   incrementFlujosVersion: () => set((state) => ({ flujosVersion: state.flujosVersion + 1 })),
   
-  // Fetch flujos from LOCAL STORAGE
+  // Fetch flujos from API and update store
   fetchFlujos: async () => {
     set({ flujosLoading: true });
     try {
-      const flujos = await localFlujosApi.getAll();
-      set({ flujos, flujosLoading: false });
+      const response = await flujosApi.getAll();
+      set({ flujos: response.data, flujosLoading: false });
     } catch (error) {
       console.error('Error fetching flujos:', error);
       set({ flujosLoading: false });
@@ -105,38 +97,26 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
   
-  // Fetch productos from LOCAL STORAGE
+  // Fetch productos from API
   fetchProductos: async () => {
     set({ productosLoading: true });
     try {
-      const productos = await localProductosApi.getAll();
-      set({ productos, productosLoading: false });
+      const response = await productosApi.getAll();
+      set({ productos: response.data, productosLoading: false });
     } catch (error) {
       console.error('Error fetching productos:', error);
       set({ productosLoading: false });
     }
   },
   
-  // Fetch calculos from LOCAL STORAGE
+  // Fetch calculos from API
   fetchCalculos: async () => {
     set({ loading: true });
     try {
-      const calculos = await localCalculosApi.getAll();
-      set({ calculos, loading: false });
+      const response = await calculosApi.getAll();
+      set({ calculos: response.data, loading: false });
     } catch (error) {
       console.error('Error fetching calculos:', error);
-      set({ loading: false });
-    }
-  },
-  
-  // Fetch cotizaciones from LOCAL STORAGE
-  fetchCotizaciones: async () => {
-    set({ loading: true });
-    try {
-      const cotizaciones = await localCotizacionesApi.getAll();
-      set({ cotizaciones, loading: false });
-    } catch (error) {
-      console.error('Error fetching cotizaciones:', error);
       set({ loading: false });
     }
   },
