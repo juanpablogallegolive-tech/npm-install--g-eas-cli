@@ -68,6 +68,14 @@ export const matchProductos = (nombres: string[]) =>
     producto_sugerido: Producto | null;
     score: number;
     sospechoso: boolean;
+    aprendido?: boolean;
   }>>('/match-productos', { nombres });
+
+// Aprendizaje de IA
+export const guardarAprendizaje = (data: {
+  nombre_original: string;
+  producto_id_correcto: string;
+  nombre_producto_correcto: string;
+}) => api.post('/aprender', data);
 
 export default api;

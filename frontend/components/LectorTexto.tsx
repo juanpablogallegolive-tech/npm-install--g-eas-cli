@@ -8,6 +8,7 @@ import {
   TextInput as RNTextInput,
   Modal,
   Image,
+  FlatList,
 } from 'react-native';
 import {
   Text,
@@ -17,10 +18,11 @@ import {
   ActivityIndicator,
   Divider,
   TextInput,
+  Searchbar,
 } from 'react-native-paper';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { matchProductos, productosApi } from '../services/api';
+import { matchProductos, productosApi, guardarAprendizaje } from '../services/api';
 import { Producto } from '../types/types';
 
 interface ProductoMatch {
@@ -29,6 +31,8 @@ interface ProductoMatch {
   producto_sugerido: Producto | null;
   score: number;
   sospechoso: boolean;
+  aprendido?: boolean;
+  modificado?: boolean; // Si el usuario cambió manualmente
 }
 
 interface Props {
@@ -46,6 +50,11 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
   const [loading, setLoading] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
   
+  // Para cambiar producto
+  const [editandoIndex, setEditandoIndex] = useState<number | null>(null);
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+  const [resultadosBusqueda, setResultadosBusqueda] = useState<Producto[]>([]);
+  
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<any>(null);
 
@@ -55,6 +64,60 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     setTextoCapturado('');
     setLineasTexto([]);
     setMatches([]);
+    setEditandoIndex(null);
+    setBusquedaProducto('');
+    setResultadosBusqueda([]);
+  };
+
+  // Buscar productos para cambiar
+  const buscarProductoParaCambiar = async (query: string) => {
+    setBusquedaProducto(query);
+    if (query.length >= 1) {
+      try {
+        const response = await productosApi.search(query);
+        setResultadosBusqueda(response.data.slice(0, 20));
+      } catch (error) {
+        console.error('Error buscando:', error);
+      }
+    } else {
+      setResultadosBusqueda([]);
+    }
+  };
+
+  // Cambiar producto manualmente y guardar aprendizaje
+  const cambiarProducto = async (index: number, nuevoProducto: Producto) => {
+    const match = matches[index];
+    
+    // Guardar aprendizaje en el backend
+    try {
+      await guardarAprendizaje({
+        nombre_original: match.nombre_original,
+        producto_id_correcto: nuevoProducto._id,
+        nombre_producto_correcto: nuevoProducto.nombre,
+      });
+    } catch (error) {
+      console.error('Error guardando aprendizaje:', error);
+    }
+    
+    // Actualizar el match
+    const nuevosMatches = [...matches];
+    nuevosMatches[index] = {
+      ...match,
+      producto_sugerido: nuevoProducto,
+      nombre_editado: nuevoProducto.nombre,
+      score: 1.0,
+      sospechoso: false,
+      aprendido: true,
+      modificado: true,
+    };
+    setMatches(nuevosMatches);
+    
+    // Cerrar búsqueda
+    setEditandoIndex(null);
+    setBusquedaProducto('');
+    setResultadosBusqueda([]);
+    
+    Alert.alert('Aprendizaje guardado', 'La IA recordará esta corrección para el futuro');
   };
 
   // Procesar texto en líneas (nombres de productos)
@@ -306,31 +369,92 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
             <Card style={styles.card}>
               <Card.Content>
                 <Text style={styles.stepTitle}>Productos encontrados</Text>
-                <Text style={styles.hint}>Rojo = posible error, revisa</Text>
+                <Text style={styles.hint}>Toca "Cambiar" para corregir y enseñar a la IA</Text>
 
                 {matches.map((match, index) => (
                   <View 
                     key={index} 
                     style={[
                       styles.matchCard,
-                      match.sospechoso && styles.matchSospechoso
+                      match.sospechoso && styles.matchSospechoso,
+                      match.aprendido && styles.matchAprendido,
+                      match.modificado && styles.matchModificado
                     ]}
                   >
                     <Text style={styles.matchOriginal}>Original: {match.nombre_original}</Text>
-                    {match.producto_sugerido ? (
-                      <>
-                        <Text style={styles.matchSugerido}>
-                          Encontrado: {match.producto_sugerido.nombre}
-                        </Text>
-                        <Text style={styles.matchPrecio}>
-                          Precio: ${match.producto_sugerido.costo_base.toLocaleString()}
-                        </Text>
-                        <Text style={styles.matchScore}>
-                          Similitud: {Math.round(match.score * 100)}%
-                        </Text>
-                      </>
+                    
+                    {editandoIndex === index ? (
+                      // Modo edición: buscar otro producto
+                      <View style={styles.editarContainer}>
+                        <Searchbar
+                          placeholder="Buscar producto correcto..."
+                          onChangeText={buscarProductoParaCambiar}
+                          value={busquedaProducto}
+                          style={styles.searchbarEdit}
+                        />
+                        {resultadosBusqueda.length > 0 && (
+                          <View style={styles.resultadosEdit}>
+                            <FlatList
+                              data={resultadosBusqueda}
+                              keyExtractor={(item) => item._id}
+                              renderItem={({ item }) => (
+                                <TouchableOpacity 
+                                  style={styles.resultadoItem}
+                                  onPress={() => cambiarProducto(index, item)}
+                                >
+                                  <Text style={styles.resultadoNombre} numberOfLines={2}>{item.nombre}</Text>
+                                  <Text style={styles.resultadoPrecio}>${item.costo_base.toLocaleString()}</Text>
+                                </TouchableOpacity>
+                              )}
+                              style={{ maxHeight: 150 }}
+                              keyboardShouldPersistTaps="handled"
+                              nestedScrollEnabled
+                            />
+                          </View>
+                        )}
+                        <Button mode="text" onPress={() => { setEditandoIndex(null); setBusquedaProducto(''); setResultadosBusqueda([]); }}>
+                          Cancelar
+                        </Button>
+                      </View>
                     ) : (
-                      <Text style={styles.matchNoEncontrado}>No encontrado en base de datos</Text>
+                      // Modo normal: mostrar resultado
+                      <>
+                        {match.producto_sugerido ? (
+                          <>
+                            <Text style={styles.matchSugerido}>
+                              {match.aprendido ? '✓ ' : ''}Encontrado: {match.producto_sugerido.nombre}
+                            </Text>
+                            <Text style={styles.matchPrecio}>
+                              Precio: ${match.producto_sugerido.costo_base.toLocaleString()}
+                            </Text>
+                            <View style={styles.matchInfoRow}>
+                              <Text style={styles.matchScore}>
+                                {match.aprendido ? 'Aprendido' : `Similitud: ${Math.round(match.score * 100)}%`}
+                              </Text>
+                              <Button 
+                                mode="text" 
+                                compact 
+                                onPress={() => setEditandoIndex(index)}
+                                icon="pencil"
+                              >
+                                Cambiar
+                              </Button>
+                            </View>
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.matchNoEncontrado}>No encontrado en base de datos</Text>
+                            <Button 
+                              mode="outlined" 
+                              compact 
+                              onPress={() => setEditandoIndex(index)}
+                              icon="magnify"
+                            >
+                              Buscar manualmente
+                            </Button>
+                          </>
+                        )}
+                      </>
                     )}
                   </View>
                 ))}
@@ -426,11 +550,20 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   matchSospechoso: { borderColor: '#d32f2f', backgroundColor: '#ffebee' },
+  matchAprendido: { borderColor: '#4caf50', backgroundColor: '#e8f5e9' },
+  matchModificado: { borderColor: '#2196f3', backgroundColor: '#e3f2fd' },
   matchOriginal: { fontSize: 12, color: '#999', marginBottom: 4 },
   matchSugerido: { fontSize: 15, fontWeight: '600', color: '#333' },
   matchPrecio: { fontSize: 14, color: '#2e7d32', marginTop: 4 },
-  matchScore: { fontSize: 12, color: '#666', marginTop: 2 },
-  matchNoEncontrado: { fontSize: 14, color: '#d32f2f', fontStyle: 'italic' },
+  matchScore: { fontSize: 12, color: '#666' },
+  matchInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  matchNoEncontrado: { fontSize: 14, color: '#d32f2f', fontStyle: 'italic', marginBottom: 8 },
+  editarContainer: { marginTop: 8 },
+  searchbarEdit: { marginBottom: 8, elevation: 0 },
+  resultadosEdit: { backgroundColor: '#f5f5f5', borderRadius: 8, marginBottom: 8 },
+  resultadoItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
+  resultadoNombre: { fontSize: 14, color: '#333' },
+  resultadoPrecio: { fontSize: 12, color: '#2e7d32', marginTop: 2 },
   cameraContainer: { flex: 1 },
   camera: { flex: 1 },
   cameraControls: { 

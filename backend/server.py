@@ -32,6 +32,7 @@ productos_col = db["productos"]
 flujos_col = db["flujos"]
 calculos_col = db["calculos"]
 cotizaciones_col = db["cotizaciones"]
+aprendizajes_col = db["aprendizajes"]  # Para aprendizaje de IA
 
 # ==================== MODELS ====================
 
@@ -561,9 +562,82 @@ def calcular_similitud(busqueda: str, producto_db: str) -> float:
 class MatchRequest(BaseModel):
     nombres: list[str]
 
+class AprendizajeRequest(BaseModel):
+    nombre_original: str
+    producto_id_correcto: str
+    nombre_producto_correcto: str
+
+def buscar_aprendizaje(nombre_buscar: str) -> dict | None:
+    """Busca si hay un aprendizaje previo para este nombre"""
+    nombre_norm = normalizar_texto(nombre_buscar)
+    
+    # Buscar coincidencia exacta normalizada
+    aprendizaje = aprendizajes_col.find_one({
+        "nombre_normalizado": nombre_norm
+    })
+    
+    if aprendizaje:
+        return aprendizaje
+    
+    # Buscar coincidencia por similitud alta (> 0.9)
+    aprendizajes = list(aprendizajes_col.find({}))
+    for apr in aprendizajes:
+        score = similitud_levenshtein(nombre_norm, apr.get("nombre_normalizado", ""))
+        if score > 0.9:
+            return apr
+    
+    return None
+
+@app.post("/api/aprender")
+def guardar_aprendizaje(request: AprendizajeRequest):
+    """Guarda una corrección para aprendizaje futuro"""
+    nombre_norm = normalizar_texto(request.nombre_original)
+    
+    # Verificar si ya existe este aprendizaje
+    existente = aprendizajes_col.find_one({"nombre_normalizado": nombre_norm})
+    
+    if existente:
+        # Actualizar el existente e incrementar contador
+        aprendizajes_col.update_one(
+            {"_id": existente["_id"]},
+            {
+                "$set": {
+                    "producto_id": request.producto_id_correcto,
+                    "nombre_producto": request.nombre_producto_correcto,
+                    "ultima_actualizacion": datetime.now()
+                },
+                "$inc": {"veces_corregido": 1}
+            }
+        )
+    else:
+        # Crear nuevo aprendizaje
+        aprendizajes_col.insert_one({
+            "nombre_original": request.nombre_original,
+            "nombre_normalizado": nombre_norm,
+            "producto_id": request.producto_id_correcto,
+            "nombre_producto": request.nombre_producto_correcto,
+            "veces_corregido": 1,
+            "fecha_creacion": datetime.now(),
+            "ultima_actualizacion": datetime.now()
+        })
+    
+    return {"message": "Aprendizaje guardado", "nombre": request.nombre_original}
+
+@app.get("/api/aprendizajes")
+def obtener_aprendizajes():
+    """Obtiene todos los aprendizajes guardados"""
+    aprendizajes = list(aprendizajes_col.find({}).sort("veces_corregido", -1))
+    return [serialize_doc(a) for a in aprendizajes]
+
+@app.delete("/api/aprendizajes/{id}")
+def eliminar_aprendizaje(id: str):
+    """Elimina un aprendizaje"""
+    aprendizajes_col.delete_one({"_id": ObjectId(id)})
+    return {"message": "Aprendizaje eliminado"}
+
 @app.post("/api/match-productos")
 def match_productos(request: MatchRequest):
-    """Busca productos similares para cada nombre dado"""
+    """Busca productos similares para cada nombre dado, usando aprendizajes previos"""
     productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}))
     
     resultados = []
@@ -571,26 +645,41 @@ def match_productos(request: MatchRequest):
         mejor_match = None
         mejor_score = 0
         segundo_score = 0
+        aprendido = False
         
-        for prod in productos:
-            score = calcular_similitud(nombre_buscar, prod["nombre"])
-            if score > mejor_score:
-                segundo_score = mejor_score
-                mejor_score = score
-                mejor_match = prod
-            elif score > segundo_score:
-                segundo_score = score
+        # PRIMERO: Buscar en aprendizajes previos
+        aprendizaje = buscar_aprendizaje(nombre_buscar)
+        if aprendizaje:
+            # Buscar el producto por ID guardado
+            producto_aprendido = productos_col.find_one({"_id": ObjectId(aprendizaje["producto_id"])})
+            if producto_aprendido:
+                mejor_match = producto_aprendido
+                mejor_score = 1.0  # Score perfecto porque fue aprendido
+                aprendido = True
         
-        # Determinar si es sospechoso
-        # - Score bajo (< 0.5)
-        # - O diferencia muy pequeña con el segundo (podría ser otro producto)
-        sospechoso = mejor_score < 0.5 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.8)
+        # Si no hay aprendizaje, usar algoritmo de similitud
+        if not aprendido:
+            for prod in productos:
+                score = calcular_similitud(nombre_buscar, prod["nombre"])
+                if score > mejor_score:
+                    segundo_score = mejor_score
+                    mejor_score = score
+                    mejor_match = prod
+                elif score > segundo_score:
+                    segundo_score = score
+        
+        # Determinar si es sospechoso (nunca si fue aprendido)
+        if aprendido:
+            sospechoso = False
+        else:
+            sospechoso = mejor_score < 0.5 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.8)
         
         resultados.append({
             "nombre_original": nombre_buscar,
             "producto_sugerido": serialize_doc(mejor_match) if mejor_match else None,
             "score": round(mejor_score, 3),
-            "sospechoso": sospechoso
+            "sospechoso": sospechoso,
+            "aprendido": aprendido
         })
     
     return resultados
