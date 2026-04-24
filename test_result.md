@@ -180,6 +180,42 @@ backend:
           agent: "testing"
           comment: "✅ MongoDB connection working - health check returns 'connected' status."
 
+  - task: "Match Productos API"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ POST /api/match-productos working correctly - tested with 'tubo pvc 1/2' query, returned valid product suggestion with score 0.8, sospechoso=false, aprendido=false. Product matching algorithm functioning properly."
+
+  - task: "Aprendizajes API"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ GET /api/aprendizajes working correctly - returns empty list (no learning data yet), valid JSON response with 200 status. AI learning system endpoint ready for use."
+
+  - task: "Clientes API"
+    implemented: false
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "testing"
+          comment: "❌ GET /api/clientes endpoint NOT IMPLEMENTED in backend code. This endpoint was requested in review but does not exist in server.py. No cliente management functionality found."
+
 frontend:
   - task: "Frontend Testing"
     implemented: false
@@ -202,6 +238,7 @@ metadata:
 test_plan:
   current_focus:
     - "All backend endpoints tested and working"
+    - "Review request endpoints completed"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -211,3 +248,5 @@ agent_communication:
       message: "Completed comprehensive backend testing. All 7 test categories passed: health check, productos endpoints, flujos endpoints, price calculation, save calculation, and cotizaciones. Backend is fully functional with 4349 products loaded and proper flow configuration."
     - agent: "testing"
       message: "New testing completed per review request: Successfully tested CRUD operations for flujos endpoints using live URL https://calc-flow-sync.preview.emergentagent.com/api. All 4 tests passed: GET initial flows (found 3 flows), POST create new flow (created 'Flujo de Prueba' with ID 69baf3eddaab3c4a15d81993), GET verify flow appears in list, DELETE test flow successfully. Database persistence and API responses working correctly."
+    - agent: "testing"
+      message: "Review request testing completed: Tested all 7 requested endpoints. Results: ✅ GET /api/productos (4349 items), ✅ GET /api/flujos (3 items), ✅ GET /api/calculos (0 items), ✅ GET /api/cotizaciones (0 items), ❌ GET /api/clientes (NOT IMPLEMENTED), ✅ POST /api/match-productos (working with product matching), ✅ GET /api/aprendizajes (0 items). 6/7 endpoints working correctly. Only /api/clientes missing from backend implementation."
