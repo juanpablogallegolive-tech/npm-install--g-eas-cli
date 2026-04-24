@@ -387,33 +387,176 @@ def calcular_precio(request: CalcularPrecioRequest):
 
 # ==================== COMPARACIÓN DE PRODUCTOS ====================
 
-def calcular_similitud(s1: str, s2: str) -> float:
-    """Calcula similitud entre dos strings usando algoritmo simple"""
-    s1 = s1.lower().strip()
-    s2 = s2.lower().strip()
+import unicodedata
+import re
+
+def normalizar_texto(texto: str) -> str:
+    """Normaliza texto: quita acentos, minúsculas, limpia caracteres especiales"""
+    # Quitar acentos
+    texto = unicodedata.normalize('NFD', texto)
+    texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+    # Minúsculas
+    texto = texto.lower().strip()
+    # Quitar caracteres especiales excepto números y espacios
+    texto = re.sub(r'[^a-z0-9\s/x\-\.]', ' ', texto)
+    # Múltiples espacios a uno
+    texto = re.sub(r'\s+', ' ', texto)
+    return texto.strip()
+
+def extraer_medidas(texto: str) -> set:
+    """Extrae medidas del texto (1/4, 3/8, M8, 10mm, etc.)"""
+    medidas = set()
+    # Fracciones: 1/4, 3/8, 1/2, etc.
+    fracciones = re.findall(r'\d+/\d+', texto)
+    medidas.update(fracciones)
+    # Métricas: M8, M10, etc.
+    metricas = re.findall(r'm\d+', texto.lower())
+    medidas.update(metricas)
+    # Milímetros: 10mm, 25mm
+    mm = re.findall(r'\d+\s*mm', texto.lower())
+    medidas.update([m.replace(' ', '') for m in mm])
+    # Pulgadas: 2", 1"
+    pulgadas = re.findall(r'\d+["\']', texto)
+    medidas.update(pulgadas)
+    # Números solos que pueden ser medidas
+    numeros = re.findall(r'\b\d+\b', texto)
+    medidas.update(numeros)
+    return medidas
+
+def extraer_palabras_clave(texto: str) -> set:
+    """Extrae palabras clave importantes del texto"""
+    texto_norm = normalizar_texto(texto)
+    palabras = set(texto_norm.split())
+    # Quitar palabras muy cortas o comunes
+    stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a'}
+    palabras = {p for p in palabras if len(p) > 1 and p not in stopwords}
+    return palabras
+
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """Calcula la distancia de Levenshtein entre dos strings"""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
     
-    if s1 == s2:
+    prev_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        curr_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = prev_row[j + 1] + 1
+            deletions = curr_row[j] + 1
+            substitutions = prev_row[j] + (c1 != c2)
+            curr_row.append(min(insertions, deletions, substitutions))
+        prev_row = curr_row
+    return prev_row[-1]
+
+def similitud_levenshtein(s1: str, s2: str) -> float:
+    """Calcula similitud basada en Levenshtein (0-1)"""
+    if not s1 or not s2:
+        return 0.0
+    dist = levenshtein_distance(s1, s2)
+    max_len = max(len(s1), len(s2))
+    return 1 - (dist / max_len)
+
+def buscar_palabra_en_texto(palabra: str, texto: str) -> float:
+    """Busca una palabra en el texto, retorna mejor score de similitud"""
+    if palabra in texto:
         return 1.0
     
-    # Palabras en común
-    words1 = set(s1.split())
-    words2 = set(s2.split())
+    palabras_texto = texto.split()
+    mejor_score = 0
     
-    if not words1 or not words2:
+    for p in palabras_texto:
+        # Similitud exacta de substring
+        if palabra in p or p in palabra:
+            score = min(len(palabra), len(p)) / max(len(palabra), len(p))
+            mejor_score = max(mejor_score, score * 0.9)
+        
+        # Similitud Levenshtein
+        if len(palabra) > 2 and len(p) > 2:
+            lev_score = similitud_levenshtein(palabra, p)
+            if lev_score > 0.7:  # Solo si es bastante similar
+                mejor_score = max(mejor_score, lev_score * 0.85)
+    
+    return mejor_score
+
+def calcular_similitud(busqueda: str, producto_db: str) -> float:
+    """
+    Calcula similitud avanzada entre texto de búsqueda y producto en DB.
+    Retorna score de 0 a 1.
+    """
+    # Normalizar ambos textos
+    busq_norm = normalizar_texto(busqueda)
+    prod_norm = normalizar_texto(producto_db)
+    
+    if not busq_norm or not prod_norm:
         return 0.0
     
-    common = words1 & words2
-    total = words1 | words2
+    # Match exacto
+    if busq_norm == prod_norm:
+        return 1.0
     
-    # Jaccard similarity
-    jaccard = len(common) / len(total) if total else 0
+    # Score inicial
+    score_total = 0.0
+    peso_total = 0.0
     
-    # Bonus por substring
-    substring_bonus = 0
-    if s1 in s2 or s2 in s1:
-        substring_bonus = 0.3
+    # 1. MEDIDAS (muy importante en ferretería) - Peso: 35%
+    medidas_busq = extraer_medidas(busqueda)
+    medidas_prod = extraer_medidas(producto_db)
     
-    return min(1.0, jaccard + substring_bonus)
+    if medidas_busq:
+        peso_medidas = 0.35
+        if medidas_busq & medidas_prod:  # Hay medidas en común
+            coincidencias = len(medidas_busq & medidas_prod)
+            total_medidas = len(medidas_busq)
+            score_medidas = coincidencias / total_medidas
+            score_total += score_medidas * peso_medidas
+        peso_total += peso_medidas
+    
+    # 2. PALABRAS CLAVE (tipo de producto) - Peso: 40%
+    palabras_busq = extraer_palabras_clave(busqueda)
+    palabras_prod = extraer_palabras_clave(producto_db)
+    
+    if palabras_busq:
+        peso_palabras = 0.40
+        score_palabras = 0
+        
+        for palabra in palabras_busq:
+            # Buscar cada palabra en el producto
+            mejor_match = buscar_palabra_en_texto(palabra, prod_norm)
+            score_palabras += mejor_match
+        
+        score_palabras = score_palabras / len(palabras_busq) if palabras_busq else 0
+        score_total += score_palabras * peso_palabras
+        peso_total += peso_palabras
+    
+    # 3. SIMILITUD GENERAL (Levenshtein del texto completo) - Peso: 15%
+    peso_general = 0.15
+    score_general = similitud_levenshtein(busq_norm, prod_norm)
+    score_total += score_general * peso_general
+    peso_total += peso_general
+    
+    # 4. SUBSTRING MATCH - Peso: 10%
+    peso_substring = 0.10
+    if busq_norm in prod_norm:
+        score_total += 1.0 * peso_substring
+    elif prod_norm in busq_norm:
+        score_total += 0.8 * peso_substring
+    peso_total += peso_substring
+    
+    # Normalizar score final
+    if peso_total > 0:
+        score_final = score_total / peso_total
+    else:
+        score_final = 0.0
+    
+    # Bonus: si la primera palabra coincide exactamente (nombre del producto)
+    primera_busq = busq_norm.split()[0] if busq_norm.split() else ''
+    primera_prod = prod_norm.split()[0] if prod_norm.split() else ''
+    if primera_busq and primera_busq == primera_prod:
+        score_final = min(1.0, score_final + 0.15)
+    
+    return min(1.0, max(0.0, score_final))
 
 class MatchRequest(BaseModel):
     nombres: list[str]
@@ -427,20 +570,26 @@ def match_productos(request: MatchRequest):
     for nombre_buscar in request.nombres:
         mejor_match = None
         mejor_score = 0
+        segundo_score = 0
         
         for prod in productos:
             score = calcular_similitud(nombre_buscar, prod["nombre"])
             if score > mejor_score:
+                segundo_score = mejor_score
                 mejor_score = score
                 mejor_match = prod
+            elif score > segundo_score:
+                segundo_score = score
         
-        # Si el score es bajo, marcar como sospechoso
-        sospechoso = mejor_score < 0.4
+        # Determinar si es sospechoso
+        # - Score bajo (< 0.5)
+        # - O diferencia muy pequeña con el segundo (podría ser otro producto)
+        sospechoso = mejor_score < 0.5 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.8)
         
         resultados.append({
             "nombre_original": nombre_buscar,
             "producto_sugerido": serialize_doc(mejor_match) if mejor_match else None,
-            "score": round(mejor_score, 2),
+            "score": round(mejor_score, 3),
             "sospechoso": sospechoso
         })
     
