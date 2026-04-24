@@ -61,4 +61,13 @@ export const calcularPrecio = (data: {
   clientes: Array<{ nombre: string; porcentaje_ganancia: number; comentario?: string }>;
 }) => api.post<{ costo_base: number; precio_calculado: number; resultados: Cliente[] }>('/calcular', data);
 
+// Match de productos
+export const matchProductos = (nombres: string[]) => 
+  api.post<Array<{
+    nombre_original: string;
+    producto_sugerido: Producto | null;
+    score: number;
+    sospechoso: boolean;
+  }>>('/match-productos', { nombres });
+
 export default api;

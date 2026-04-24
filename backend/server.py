@@ -286,6 +286,17 @@ def get_calculo(calculo_id: str):
 def guardar_calculo(calculo: Calculo):
     calculo_dict = calculo.model_dump()
     calculo_dict["fecha"] = datetime.now()
+    
+    # Actualizar el costo_base del producto en la base de datos
+    if calculo.producto_id:
+        try:
+            productos_col.update_one(
+                {"_id": ObjectId(calculo.producto_id)},
+                {"$set": {"costo_base": calculo.costo_base}}
+            )
+        except:
+            pass  # Si falla, continuar guardando el cálculo
+    
     result = calculos_col.insert_one(calculo_dict)
     calculo_dict["_id"] = str(result.inserted_id)
     return serialize_doc(calculo_dict)
@@ -372,6 +383,67 @@ def calcular_precio(request: CalcularPrecioRequest):
         "precio_calculado": round(precio_actual, 2),  # Precio después del flujo, antes de ganancia
         "resultados": resultados
     }
+
+# ==================== COMPARACIÓN DE PRODUCTOS ====================
+
+def calcular_similitud(s1: str, s2: str) -> float:
+    """Calcula similitud entre dos strings usando algoritmo simple"""
+    s1 = s1.lower().strip()
+    s2 = s2.lower().strip()
+    
+    if s1 == s2:
+        return 1.0
+    
+    # Palabras en común
+    words1 = set(s1.split())
+    words2 = set(s2.split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    common = words1 & words2
+    total = words1 | words2
+    
+    # Jaccard similarity
+    jaccard = len(common) / len(total) if total else 0
+    
+    # Bonus por substring
+    substring_bonus = 0
+    if s1 in s2 or s2 in s1:
+        substring_bonus = 0.3
+    
+    return min(1.0, jaccard + substring_bonus)
+
+class MatchRequest(BaseModel):
+    nombres: list[str]
+
+@app.post("/api/match-productos")
+def match_productos(request: MatchRequest):
+    """Busca productos similares para cada nombre dado"""
+    productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}))
+    
+    resultados = []
+    for nombre_buscar in request.nombres:
+        mejor_match = None
+        mejor_score = 0
+        
+        for prod in productos:
+            score = calcular_similitud(nombre_buscar, prod["nombre"])
+            if score > mejor_score:
+                mejor_score = score
+                mejor_match = prod
+        
+        # Si el score es bajo, marcar como sospechoso
+        sospechoso = mejor_score < 0.4
+        
+        resultados.append({
+            "nombre_original": nombre_buscar,
+            "producto_sugerido": serialize_doc(mejor_match) if mejor_match else None,
+            "score": round(mejor_score, 2),
+            "sospechoso": sospechoso
+        })
+    
+    return resultados
 
 # ==================== HEALTH CHECK ====================
 

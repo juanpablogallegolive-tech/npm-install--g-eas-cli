@@ -29,6 +29,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
+import LectorTexto from '../components/LectorTexto';
 
 export default function QuotesScreen() {
   const [nombreCliente, setNombreCliente] = useState('');
@@ -40,6 +41,7 @@ export default function QuotesScreen() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [editingCotizacionId, setEditingCotizacionId] = useState<string | null>(null);
+  const [lectorVisible, setLectorVisible] = useState(false);
   
   // Búsqueda de productos
   const [searchQuery, setSearchQuery] = useState('');
@@ -133,6 +135,16 @@ export default function QuotesScreen() {
     setItems([]);
     setTotal(0);
     setEditingCotizacionId(null);
+  };
+
+  // Manejar productos del lector
+  const handleProductosLector = (productosLector: Array<{ producto: Producto; cantidad: number }>) => {
+    const nuevosItems = productosLector.map(p => ({
+      cantidad: p.cantidad.toString(),
+      producto: p.producto,
+      subtotal: p.cantidad * p.producto.costo_base,
+    }));
+    setItems([...items, ...nuevosItems]);
   };
 
   const guardarCotizacion = async () => {
@@ -523,7 +535,10 @@ export default function QuotesScreen() {
           <Card.Content>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Productos</Text>
-              <IconButton icon="plus" size={24} onPress={agregarFila} mode="contained" />
+              <View style={{ flexDirection: 'row' }}>
+                <IconButton icon="text-recognition" size={24} onPress={() => setLectorVisible(true)} mode="contained" containerColor="#4caf50" iconColor="#fff" />
+                <IconButton icon="plus" size={24} onPress={agregarFila} mode="contained" />
+              </View>
             </View>
 
             {items.map((item, index) => (
@@ -706,6 +721,13 @@ export default function QuotesScreen() {
           </Button>
         </Modal>
       </Portal>
+
+      {/* Lector de Texto */}
+      <LectorTexto
+        visible={lectorVisible}
+        onClose={() => setLectorVisible(false)}
+        onProductosSeleccionados={handleProductosLector}
+      />
     </View>
   );
 }
