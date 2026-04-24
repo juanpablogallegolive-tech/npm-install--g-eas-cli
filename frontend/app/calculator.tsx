@@ -285,6 +285,7 @@ export default function CalculatorScreen() {
 
       await calculosApi.create({
         nombre_producto: selectedProduct?.nombre || searchQuery || 'Producto',
+        producto_id: selectedProduct?._id || '',
         flujo_nombre: selectedFlujo.nombre,
         flujo_id: selectedFlujo._id,
         valores_operaciones: valoresNum,

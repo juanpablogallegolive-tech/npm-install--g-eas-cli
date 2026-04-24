@@ -52,6 +52,8 @@
       "expo-router",
       "expo-document-picker",
       "expo-file-system",
+      "expo-camera",
+      "expo-image-picker",
       [
         "expo-splash-screen",
         {

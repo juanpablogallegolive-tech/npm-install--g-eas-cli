@@ -89,6 +89,7 @@ class Cliente(BaseModel):
 
 class Calculo(BaseModel):
     nombre_producto: str
+    producto_id: Optional[str] = None
     flujo_nombre: str
     flujo_id: Optional[str] = None
     valores_operaciones: Dict[str, float] = {}
