@@ -166,11 +166,10 @@ def aplicar_operacion(precio_base: float, operacion: dict, valor: float) -> floa
 
 @app.get("/api/productos")
 def get_productos(skip: int = 0, limit: int = 0):
-    # Si limit es 0, obtener todos los productos
+    # Si limit es 0, obtener todos los productos con un límite máximo razonable
     if limit == 0:
-        productos = list(productos_col.find().skip(skip))
-    else:
-        productos = list(productos_col.find().skip(skip).limit(limit))
+        limit = 5000  # Límite máximo para evitar timeout en producción
+    productos = list(productos_col.find().skip(skip).limit(limit))
     return [serialize_doc(p) for p in productos]
 
 @app.get("/api/productos/count")
@@ -579,8 +578,8 @@ def buscar_aprendizaje(nombre_buscar: str) -> dict | None:
     if aprendizaje:
         return aprendizaje
     
-    # Buscar coincidencia por similitud alta (> 0.9)
-    aprendizajes = list(aprendizajes_col.find({}))
+    # Buscar coincidencia por similitud alta (> 0.9) - limitado a 100 registros
+    aprendizajes = list(aprendizajes_col.find({}).limit(100))
     for apr in aprendizajes:
         score = similitud_levenshtein(nombre_norm, apr.get("nombre_normalizado", ""))
         if score > 0.9:
@@ -625,8 +624,8 @@ def guardar_aprendizaje(request: AprendizajeRequest):
 
 @app.get("/api/aprendizajes")
 def obtener_aprendizajes():
-    """Obtiene todos los aprendizajes guardados"""
-    aprendizajes = list(aprendizajes_col.find({}).sort("veces_corregido", -1))
+    """Obtiene todos los aprendizajes guardados (máximo 500 para evitar timeout)"""
+    aprendizajes = list(aprendizajes_col.find({}).sort("veces_corregido", -1).limit(500))
     return [serialize_doc(a) for a in aprendizajes]
 
 @app.delete("/api/aprendizajes/{id}")
@@ -638,7 +637,8 @@ def eliminar_aprendizaje(id: str):
 @app.post("/api/match-productos")
 def match_productos(request: MatchRequest):
     """Busca productos similares para cada nombre dado, usando aprendizajes previos"""
-    productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}))
+    # Limitar a 5000 productos para evitar timeout en producción
+    productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}).limit(5000))
     
     resultados = []
     for nombre_buscar in request.nombres:
