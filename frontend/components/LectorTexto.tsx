@@ -117,7 +117,49 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     setBusquedaProducto('');
     setResultadosBusqueda([]);
     
-    Alert.alert('Aprendizaje guardado', 'La IA recordará esta corrección para el futuro');
+    Alert.alert('✓ Aprendizaje guardado', `La IA recordará que "${match.nombre_original}" = "${nuevoProducto.nombre}"`);
+  };
+
+  // Confirmar que la sugerencia es correcta (también aprende)
+  const confirmarSugerencia = async (index: number) => {
+    const match = matches[index];
+    if (!match.producto_sugerido) return;
+    
+    // Guardar aprendizaje para reforzar
+    try {
+      await guardarAprendizaje({
+        nombre_original: match.nombre_original,
+        producto_id_correcto: match.producto_sugerido._id,
+        nombre_producto_correcto: match.producto_sugerido.nombre,
+      });
+    } catch (error) {
+      console.error('Error guardando aprendizaje:', error);
+    }
+    
+    // Actualizar el match
+    const nuevosMatches = [...matches];
+    nuevosMatches[index] = {
+      ...match,
+      sospechoso: false,
+      aprendido: true,
+    };
+    setMatches(nuevosMatches);
+    
+    Alert.alert('✓ Confirmado', 'La IA recordará esta asociación');
+  };
+
+  // Saltar/omitir un producto
+  const saltarProducto = (index: number) => {
+    const nuevosMatches = [...matches];
+    nuevosMatches[index] = {
+      ...nuevosMatches[index],
+      producto_sugerido: null,
+      sospechoso: false,
+    };
+    setMatches(nuevosMatches);
+    setEditandoIndex(null);
+    setBusquedaProducto('');
+    setResultadosBusqueda([]);
   };
 
   // Procesar texto en líneas (nombres de productos)
@@ -369,28 +411,31 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
             <Card style={styles.card}>
               <Card.Content>
                 <Text style={styles.stepTitle}>Productos encontrados</Text>
-                <Text style={styles.hint}>Toca "Cambiar" para corregir y enseñar a la IA</Text>
+                <Text style={styles.hint}>La IA aprende de cada corrección que hagas</Text>
 
                 {matches.map((match, index) => (
                   <View 
                     key={index} 
                     style={[
                       styles.matchCard,
-                      match.sospechoso && styles.matchSospechoso,
+                      match.sospechoso && !match.producto_sugerido && styles.matchNoEntendido,
+                      match.sospechoso && match.producto_sugerido && styles.matchSospechoso,
                       match.aprendido && styles.matchAprendido,
                       match.modificado && styles.matchModificado
                     ]}
                   >
-                    <Text style={styles.matchOriginal}>Original: {match.nombre_original}</Text>
+                    <Text style={styles.matchOriginal}>Buscaste: "{match.nombre_original}"</Text>
                     
                     {editandoIndex === index ? (
                       // Modo edición: buscar otro producto
                       <View style={styles.editarContainer}>
+                        <Text style={styles.editarTitulo}>Busca el producto correcto:</Text>
                         <Searchbar
-                          placeholder="Buscar producto correcto..."
+                          placeholder="Escribe para buscar..."
                           onChangeText={buscarProductoParaCambiar}
                           value={busquedaProducto}
                           style={styles.searchbarEdit}
+                          autoFocus
                         />
                         {resultadosBusqueda.length > 0 && (
                           <View style={styles.resultadosEdit}>
@@ -406,53 +451,108 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
                                   <Text style={styles.resultadoPrecio}>${item.costo_base.toLocaleString()}</Text>
                                 </TouchableOpacity>
                               )}
-                              style={{ maxHeight: 150 }}
+                              style={{ maxHeight: 200 }}
                               keyboardShouldPersistTaps="handled"
                               nestedScrollEnabled
                             />
                           </View>
                         )}
-                        <Button mode="text" onPress={() => { setEditandoIndex(null); setBusquedaProducto(''); setResultadosBusqueda([]); }}>
-                          Cancelar
-                        </Button>
+                        <View style={styles.editarBotones}>
+                          <Button mode="text" onPress={() => { setEditandoIndex(null); setBusquedaProducto(''); setResultadosBusqueda([]); }}>
+                            Cancelar
+                          </Button>
+                          <Button mode="text" onPress={() => saltarProducto(index)} textColor="#d32f2f">
+                            Omitir este
+                          </Button>
+                        </View>
                       </View>
                     ) : (
                       // Modo normal: mostrar resultado
                       <>
                         {match.producto_sugerido ? (
-                          <>
-                            <Text style={styles.matchSugerido}>
-                              {match.aprendido ? '✓ ' : ''}Encontrado: {match.producto_sugerido.nombre}
-                            </Text>
-                            <Text style={styles.matchPrecio}>
-                              Precio: ${match.producto_sugerido.costo_base.toLocaleString()}
-                            </Text>
-                            <View style={styles.matchInfoRow}>
-                              <Text style={styles.matchScore}>
-                                {match.aprendido ? 'Aprendido' : `Similitud: ${Math.round(match.score * 100)}%`}
+                          match.sospechoso && !match.aprendido ? (
+                            // Producto encontrado pero con baja confianza
+                            <View style={styles.sospechosoContainer}>
+                              <Text style={styles.sospechosoTitulo}>
+                                🤔 No estoy seguro... ¿Es este?
                               </Text>
+                              <Text style={styles.matchSugerido}>{match.producto_sugerido.nombre}</Text>
+                              <Text style={styles.matchPrecio}>
+                                ${match.producto_sugerido.costo_base.toLocaleString()}
+                              </Text>
+                              <Text style={styles.matchScore}>
+                                Similitud: {Math.round(match.score * 100)}%
+                              </Text>
+                              <View style={styles.sospechosoButtons}>
+                                <Button 
+                                  mode="contained" 
+                                  compact 
+                                  onPress={() => confirmarSugerencia(index)}
+                                  buttonColor="#4caf50"
+                                  icon="check"
+                                >
+                                  Sí, es correcto
+                                </Button>
+                                <Button 
+                                  mode="outlined" 
+                                  compact 
+                                  onPress={() => setEditandoIndex(index)}
+                                  icon="magnify"
+                                >
+                                  No, buscar otro
+                                </Button>
+                              </View>
+                            </View>
+                          ) : (
+                            // Producto encontrado con buena confianza
+                            <>
+                              <Text style={styles.matchSugerido}>
+                                {match.aprendido ? '✓ ' : '→ '}{match.producto_sugerido.nombre}
+                              </Text>
+                              <Text style={styles.matchPrecio}>
+                                ${match.producto_sugerido.costo_base.toLocaleString()}
+                              </Text>
+                              <View style={styles.matchInfoRow}>
+                                <Text style={styles.matchScore}>
+                                  {match.aprendido ? '✓ Aprendido' : `${Math.round(match.score * 100)}% similitud`}
+                                </Text>
+                                <Button 
+                                  mode="text" 
+                                  compact 
+                                  onPress={() => setEditandoIndex(index)}
+                                  icon="pencil"
+                                >
+                                  Cambiar
+                                </Button>
+                              </View>
+                            </>
+                          )
+                        ) : (
+                          // No encontrado
+                          <View style={styles.noEntendidoContainer}>
+                            <Text style={styles.noEntendidoTitulo}>
+                              ❌ No entendí "{match.nombre_original}"
+                            </Text>
+                            <Text style={styles.noEntendidoDesc}>
+                              ¿Podrías buscar el producto correcto? La IA aprenderá de tu corrección.
+                            </Text>
+                            <View style={styles.noEntendidoButtons}>
+                              <Button 
+                                mode="contained" 
+                                onPress={() => setEditandoIndex(index)}
+                                icon="magnify"
+                              >
+                                Buscar producto
+                              </Button>
                               <Button 
                                 mode="text" 
-                                compact 
-                                onPress={() => setEditandoIndex(index)}
-                                icon="pencil"
+                                onPress={() => saltarProducto(index)}
+                                textColor="#666"
                               >
-                                Cambiar
+                                Omitir
                               </Button>
                             </View>
-                          </>
-                        ) : (
-                          <>
-                            <Text style={styles.matchNoEncontrado}>No encontrado en base de datos</Text>
-                            <Button 
-                              mode="outlined" 
-                              compact 
-                              onPress={() => setEditandoIndex(index)}
-                              icon="magnify"
-                            >
-                              Buscar manualmente
-                            </Button>
-                          </>
+                          </View>
                         )}
                       </>
                     )}
@@ -462,7 +562,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
                 <Divider style={{ marginVertical: 16 }} />
 
                 <View style={styles.buttonRow}>
-                  <Button mode="outlined" onPress={() => setStep('edit')}>Editar</Button>
+                  <Button mode="outlined" onPress={() => setStep('edit')}>Volver a editar</Button>
                   <Button 
                     mode="contained" 
                     onPress={confirmarSeleccion}
@@ -549,21 +649,33 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#e0e0e0',
   },
-  matchSospechoso: { borderColor: '#d32f2f', backgroundColor: '#ffebee' },
+  matchSospechoso: { borderColor: '#ff9800', backgroundColor: '#fff3e0' },
+  matchNoEntendido: { borderColor: '#d32f2f', backgroundColor: '#ffebee' },
   matchAprendido: { borderColor: '#4caf50', backgroundColor: '#e8f5e9' },
   matchModificado: { borderColor: '#2196f3', backgroundColor: '#e3f2fd' },
-  matchOriginal: { fontSize: 12, color: '#999', marginBottom: 4 },
+  matchOriginal: { fontSize: 12, color: '#666', marginBottom: 8, fontStyle: 'italic' },
   matchSugerido: { fontSize: 15, fontWeight: '600', color: '#333' },
   matchPrecio: { fontSize: 14, color: '#2e7d32', marginTop: 4 },
   matchScore: { fontSize: 12, color: '#666' },
   matchInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
   matchNoEncontrado: { fontSize: 14, color: '#d32f2f', fontStyle: 'italic', marginBottom: 8 },
   editarContainer: { marginTop: 8 },
+  editarTitulo: { fontSize: 13, color: '#333', marginBottom: 8, fontWeight: '500' },
+  editarBotones: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   searchbarEdit: { marginBottom: 8, elevation: 0 },
   resultadosEdit: { backgroundColor: '#f5f5f5', borderRadius: 8, marginBottom: 8 },
-  resultadoItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
+  resultadoItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
   resultadoNombre: { fontSize: 14, color: '#333' },
   resultadoPrecio: { fontSize: 12, color: '#2e7d32', marginTop: 2 },
+  // Estilos para "no entendido"
+  noEntendidoContainer: { marginTop: 4 },
+  noEntendidoTitulo: { fontSize: 15, fontWeight: '600', color: '#d32f2f', marginBottom: 8 },
+  noEntendidoDesc: { fontSize: 13, color: '#666', marginBottom: 12 },
+  noEntendidoButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Estilos para "sospechoso"
+  sospechosoContainer: { marginTop: 4 },
+  sospechosoTitulo: { fontSize: 14, fontWeight: '600', color: '#ff9800', marginBottom: 8 },
+  sospechosoButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, gap: 8 },
   cameraContainer: { flex: 1 },
   camera: { flex: 1 },
   cameraControls: { 

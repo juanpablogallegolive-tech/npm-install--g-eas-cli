@@ -689,36 +689,83 @@ class AprendizajeRequest(BaseModel):
 def buscar_aprendizaje(nombre_buscar: str) -> dict | None:
     """Busca si hay un aprendizaje previo para este nombre"""
     nombre_norm = normalizar_texto(nombre_buscar)
+    nombre_expandido = expandir_sinonimos(nombre_norm)
     
-    # Buscar coincidencia exacta normalizada
-    aprendizaje = aprendizajes_col.find_one({
-        "nombre_normalizado": nombre_norm
-    })
-    
+    # 1. Buscar coincidencia exacta normalizada
+    aprendizaje = aprendizajes_col.find_one({"nombre_normalizado": nombre_norm})
     if aprendizaje:
         return aprendizaje
     
-    # Buscar coincidencia por similitud alta (> 0.9) - limitado a 100 registros
-    aprendizajes = list(aprendizajes_col.find({}).limit(100))
-    for apr in aprendizajes:
-        score = similitud_levenshtein(nombre_norm, apr.get("nombre_normalizado", ""))
-        if score > 0.9:
-            return apr
+    # 2. Buscar en lista de alias del producto
+    aprendizaje = aprendizajes_col.find_one({"aliases_normalizados": nombre_norm})
+    if aprendizaje:
+        return aprendizaje
     
-    return None
+    # 3. Buscar coincidencia por similitud alta (> 0.85) usando n-gramas
+    aprendizajes = list(aprendizajes_col.find({}).sort("veces_corregido", -1).limit(200))
+    mejor_apr = None
+    mejor_score = 0
+    
+    for apr in aprendizajes:
+        # Comparar con nombre principal
+        score1 = similitud_ngramas(nombre_expandido, apr.get("nombre_normalizado", ""))
+        score2 = similitud_levenshtein(nombre_norm, apr.get("nombre_normalizado", ""))
+        score = max(score1, score2)
+        
+        # Comparar con aliases
+        for alias in apr.get("aliases_normalizados", []):
+            s1 = similitud_ngramas(nombre_expandido, alias)
+            s2 = similitud_levenshtein(nombre_norm, alias)
+            score = max(score, s1, s2)
+        
+        if score > mejor_score and score > 0.85:
+            mejor_score = score
+            mejor_apr = apr
+    
+    return mejor_apr
 
 @app.post("/api/aprender")
 def guardar_aprendizaje(request: AprendizajeRequest):
-    """Guarda una corrección para aprendizaje futuro"""
+    """Guarda una corrección para aprendizaje futuro - permite múltiples aliases por producto"""
     nombre_norm = normalizar_texto(request.nombre_original)
     
-    # Verificar si ya existe este aprendizaje
-    existente = aprendizajes_col.find_one({"nombre_normalizado": nombre_norm})
+    # Buscar si ya existe aprendizaje para ESTE PRODUCTO
+    existente_producto = aprendizajes_col.find_one({"producto_id": request.producto_id_correcto})
     
-    if existente:
-        # Actualizar el existente e incrementar contador
+    if existente_producto:
+        # Agregar este nombre como nuevo alias si no existe
+        aliases = existente_producto.get("aliases", [])
+        aliases_norm = existente_producto.get("aliases_normalizados", [])
+        
+        if request.nombre_original not in aliases:
+            aliases.append(request.nombre_original)
+        if nombre_norm not in aliases_norm:
+            aliases_norm.append(nombre_norm)
+        
         aprendizajes_col.update_one(
-            {"_id": existente["_id"]},
+            {"_id": existente_producto["_id"]},
+            {
+                "$set": {
+                    "aliases": aliases,
+                    "aliases_normalizados": aliases_norm,
+                    "ultima_actualizacion": datetime.now()
+                },
+                "$inc": {"veces_corregido": 1}
+            }
+        )
+        return {
+            "message": "Alias agregado al aprendizaje existente",
+            "nombre": request.nombre_original,
+            "total_aliases": len(aliases)
+        }
+    
+    # Buscar si ya existe este nombre exacto
+    existente_nombre = aprendizajes_col.find_one({"nombre_normalizado": nombre_norm})
+    
+    if existente_nombre:
+        # Actualizar a nuevo producto
+        aprendizajes_col.update_one(
+            {"_id": existente_nombre["_id"]},
             {
                 "$set": {
                     "producto_id": request.producto_id_correcto,
@@ -733,6 +780,8 @@ def guardar_aprendizaje(request: AprendizajeRequest):
         aprendizajes_col.insert_one({
             "nombre_original": request.nombre_original,
             "nombre_normalizado": nombre_norm,
+            "aliases": [request.nombre_original],
+            "aliases_normalizados": [nombre_norm],
             "producto_id": request.producto_id_correcto,
             "nombre_producto": request.nombre_producto_correcto,
             "veces_corregido": 1,
