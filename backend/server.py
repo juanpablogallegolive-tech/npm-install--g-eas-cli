@@ -390,34 +390,131 @@ def calcular_precio(request: CalcularPrecioRequest):
 import unicodedata
 import re
 
+# ==================== DICCIONARIO DE SINÓNIMOS Y ABREVIACIONES ====================
+SINONIMOS = {
+    # Materiales
+    'pvc': ['plastico', 'vinyl', 'vinilo'],
+    'hg': ['hierro galvanizado', 'galvanizado', 'galv'],
+    'galv': ['galvanizado', 'hg'],
+    'inox': ['inoxidable', 'acero inoxidable', 'ss'],
+    'ac': ['acero', 'steel'],
+    'bro': ['bronce'],
+    'cob': ['cobre', 'copper'],
+    'alu': ['aluminio', 'aluminum'],
+    'mad': ['madera', 'wood'],
+    # Tipos de productos
+    'tb': ['tubo', 'tuberia', 'pipe'],
+    'tbo': ['tubo', 'tuberia'],
+    'tubo': ['tuberia', 'tb', 'pipe'],
+    'val': ['valvula', 'valve', 'llave'],
+    'valv': ['valvula', 'valve'],
+    'llav': ['llave', 'valvula', 'grifo'],
+    'codo': ['cod', 'elbow', 'curva'],
+    'tee': ['te', 't'],
+    'red': ['reduccion', 'reductor', 'reducer'],
+    'uni': ['union', 'acople', 'coupling'],
+    'nip': ['niple', 'nipple'],
+    'tap': ['tapon', 'plug', 'cap'],
+    'abr': ['abrazadera', 'clamp'],
+    'torn': ['tornillo', 'screw', 'bolt'],
+    'tuer': ['tuerca', 'nut'],
+    'aran': ['arandela', 'washer'],
+    'clav': ['clavo', 'nail'],
+    'pern': ['perno', 'bolt'],
+    'conec': ['conector', 'connector'],
+    'mang': ['manguera', 'hose'],
+    'flex': ['flexible', 'flexo'],
+    'rig': ['rigido', 'rigid'],
+    # Medidas escritas
+    'media': ['1/2', '0.5'],
+    'cuarto': ['1/4', '0.25'],
+    'tres octavos': ['3/8'],
+    'tres cuartos': ['3/4', '0.75'],
+    'pulgada': ['1', '"', 'inch'],
+    'pulg': ['pulgada', '"'],
+    # Colores
+    'bco': ['blanco', 'white'],
+    'ngo': ['negro', 'black'],
+    'gris': ['grey', 'gray'],
+    'rjo': ['rojo', 'red'],
+    'azl': ['azul', 'blue'],
+    'vde': ['verde', 'green'],
+    'ama': ['amarillo', 'yellow'],
+}
+
+# Crear diccionario inverso para búsqueda rápida
+SINONIMOS_INVERSO = {}
+for palabra, sinonimos in SINONIMOS.items():
+    SINONIMOS_INVERSO[palabra] = palabra
+    for sin in sinonimos:
+        SINONIMOS_INVERSO[sin.split()[0]] = palabra  # Solo primera palabra
+
 def normalizar_texto(texto: str) -> str:
     """Normaliza texto: quita acentos, minúsculas, limpia caracteres especiales"""
-    # Quitar acentos
+    if not texto:
+        return ""
     texto = unicodedata.normalize('NFD', texto)
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
-    # Minúsculas
     texto = texto.lower().strip()
-    # Quitar caracteres especiales excepto números y espacios
     texto = re.sub(r'[^a-z0-9\s/x\-\.]', ' ', texto)
-    # Múltiples espacios a uno
     texto = re.sub(r'\s+', ' ', texto)
     return texto.strip()
+
+def expandir_sinonimos(texto: str) -> str:
+    """Expande abreviaciones y normaliza sinónimos a términos estándar"""
+    palabras = texto.split()
+    expandidas = []
+    for p in palabras:
+        if p in SINONIMOS_INVERSO:
+            expandidas.append(SINONIMOS_INVERSO[p])
+        else:
+            expandidas.append(p)
+    return ' '.join(expandidas)
+
+def generar_ngramas(texto: str, n: int = 2) -> set:
+    """Genera n-gramas de un texto para fuzzy matching"""
+    texto = texto.replace(' ', '')
+    if len(texto) < n:
+        return {texto}
+    return {texto[i:i+n] for i in range(len(texto) - n + 1)}
+
+def similitud_ngramas(s1: str, s2: str, n: int = 2) -> float:
+    """Calcula similitud usando n-gramas (más tolerante a errores)"""
+    ng1 = generar_ngramas(s1, n)
+    ng2 = generar_ngramas(s2, n)
+    if not ng1 or not ng2:
+        return 0.0
+    interseccion = len(ng1 & ng2)
+    union = len(ng1 | ng2)
+    return interseccion / union if union > 0 else 0.0
 
 def extraer_medidas(texto: str) -> set:
     """Extrae medidas del texto (1/4, 3/8, M8, 10mm, etc.)"""
     medidas = set()
+    texto_lower = texto.lower()
     # Fracciones: 1/4, 3/8, 1/2, etc.
     fracciones = re.findall(r'\d+/\d+', texto)
     medidas.update(fracciones)
+    # Convertir palabras a fracciones
+    if 'media' in texto_lower or 'medio' in texto_lower:
+        medidas.add('1/2')
+    if 'cuarto' in texto_lower:
+        medidas.add('1/4')
+    if 'tres cuartos' in texto_lower:
+        medidas.add('3/4')
+    if 'tres octavos' in texto_lower:
+        medidas.add('3/8')
     # Métricas: M8, M10, etc.
-    metricas = re.findall(r'm\d+', texto.lower())
+    metricas = re.findall(r'm\d+', texto_lower)
     medidas.update(metricas)
     # Milímetros: 10mm, 25mm
-    mm = re.findall(r'\d+\s*mm', texto.lower())
+    mm = re.findall(r'\d+\s*mm', texto_lower)
     medidas.update([m.replace(' ', '') for m in mm])
-    # Pulgadas: 2", 1"
+    # Pulgadas: 2", 1", 2 pulgadas
     pulgadas = re.findall(r'\d+["\']', texto)
     medidas.update(pulgadas)
+    pulgadas_texto = re.findall(r'(\d+)\s*pulg', texto_lower)
+    medidas.update(pulgadas_texto)
     # Números solos que pueden ser medidas
     numeros = re.findall(r'\b\d+\b', texto)
     medidas.update(numeros)
@@ -426,9 +523,9 @@ def extraer_medidas(texto: str) -> set:
 def extraer_palabras_clave(texto: str) -> set:
     """Extrae palabras clave importantes del texto"""
     texto_norm = normalizar_texto(texto)
-    palabras = set(texto_norm.split())
-    # Quitar palabras muy cortas o comunes
-    stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a'}
+    texto_expandido = expandir_sinonimos(texto_norm)
+    palabras = set(texto_expandido.split())
+    stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
     palabras = {p for p in palabras if len(p) > 1 and p not in stopwords}
     return palabras
 
@@ -483,6 +580,7 @@ def buscar_palabra_en_texto(palabra: str, texto: str) -> float:
 def calcular_similitud(busqueda: str, producto_db: str) -> float:
     """
     Calcula similitud avanzada entre texto de búsqueda y producto en DB.
+    Usa sinónimos, n-gramas y múltiples estrategias para mejor matching.
     Retorna score de 0 a 1.
     """
     # Normalizar ambos textos
@@ -496,16 +594,23 @@ def calcular_similitud(busqueda: str, producto_db: str) -> float:
     if busq_norm == prod_norm:
         return 1.0
     
-    # Score inicial
+    # Expandir sinónimos para comparación
+    busq_expandido = expandir_sinonimos(busq_norm)
+    prod_expandido = expandir_sinonimos(prod_norm)
+    
+    # Match exacto después de expandir sinónimos
+    if busq_expandido == prod_expandido:
+        return 0.98
+    
     score_total = 0.0
     peso_total = 0.0
     
-    # 1. MEDIDAS (muy importante en ferretería) - Peso: 35%
+    # 1. MEDIDAS (muy importante en ferretería) - Peso: 30%
     medidas_busq = extraer_medidas(busqueda)
     medidas_prod = extraer_medidas(producto_db)
     
     if medidas_busq:
-        peso_medidas = 0.35
+        peso_medidas = 0.30
         if medidas_busq & medidas_prod:  # Hay medidas en común
             coincidencias = len(medidas_busq & medidas_prod)
             total_medidas = len(medidas_busq)
@@ -513,31 +618,38 @@ def calcular_similitud(busqueda: str, producto_db: str) -> float:
             score_total += score_medidas * peso_medidas
         peso_total += peso_medidas
     
-    # 2. PALABRAS CLAVE (tipo de producto) - Peso: 40%
+    # 2. PALABRAS CLAVE CON SINÓNIMOS - Peso: 35%
     palabras_busq = extraer_palabras_clave(busqueda)
     palabras_prod = extraer_palabras_clave(producto_db)
     
     if palabras_busq:
-        peso_palabras = 0.40
+        peso_palabras = 0.35
         score_palabras = 0
         
         for palabra in palabras_busq:
-            # Buscar cada palabra en el producto
-            mejor_match = buscar_palabra_en_texto(palabra, prod_norm)
+            mejor_match = buscar_palabra_en_texto(palabra, prod_expandido)
+            # También buscar en versión original
+            mejor_match = max(mejor_match, buscar_palabra_en_texto(palabra, prod_norm))
             score_palabras += mejor_match
         
         score_palabras = score_palabras / len(palabras_busq) if palabras_busq else 0
         score_total += score_palabras * peso_palabras
         peso_total += peso_palabras
     
-    # 3. SIMILITUD GENERAL (Levenshtein del texto completo) - Peso: 15%
-    peso_general = 0.15
-    score_general = similitud_levenshtein(busq_norm, prod_norm)
+    # 3. SIMILITUD N-GRAMAS (tolerante a errores de escritura) - Peso: 20%
+    peso_ngramas = 0.20
+    score_ngramas = similitud_ngramas(busq_expandido, prod_expandido, 2)
+    score_total += score_ngramas * peso_ngramas
+    peso_total += peso_ngramas
+    
+    # 4. SIMILITUD LEVENSHTEIN - Peso: 10%
+    peso_general = 0.10
+    score_general = similitud_levenshtein(busq_expandido, prod_expandido)
     score_total += score_general * peso_general
     peso_total += peso_general
     
-    # 4. SUBSTRING MATCH - Peso: 10%
-    peso_substring = 0.10
+    # 5. SUBSTRING MATCH - Peso: 5%
+    peso_substring = 0.05
     if busq_norm in prod_norm:
         score_total += 1.0 * peso_substring
     elif prod_norm in busq_norm:
@@ -550,11 +662,19 @@ def calcular_similitud(busqueda: str, producto_db: str) -> float:
     else:
         score_final = 0.0
     
-    # Bonus: si la primera palabra coincide exactamente (nombre del producto)
-    primera_busq = busq_norm.split()[0] if busq_norm.split() else ''
-    primera_prod = prod_norm.split()[0] if prod_norm.split() else ''
-    if primera_busq and primera_busq == primera_prod:
-        score_final = min(1.0, score_final + 0.15)
+    # Bonus: primera palabra coincide (tipo de producto)
+    primera_busq = busq_expandido.split()[0] if busq_expandido.split() else ''
+    primera_prod = prod_expandido.split()[0] if prod_expandido.split() else ''
+    if primera_busq and primera_busq == primera_prod and len(primera_busq) > 2:
+        score_final = min(1.0, score_final + 0.12)
+    
+    # Bonus: si contiene todas las palabras importantes
+    if palabras_busq and palabras_prod:
+        palabras_encontradas = sum(1 for p in palabras_busq if any(
+            similitud_levenshtein(p, pp) > 0.8 for pp in palabras_prod
+        ))
+        if palabras_encontradas == len(palabras_busq):
+            score_final = min(1.0, score_final + 0.1)
     
     return min(1.0, max(0.0, score_final))
 
