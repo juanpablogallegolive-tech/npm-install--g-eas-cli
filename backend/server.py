@@ -805,53 +805,83 @@ def eliminar_aprendizaje(id: str):
 
 @app.post("/api/match-productos")
 def match_productos(request: MatchRequest):
-    """Busca productos similares para cada nombre dado, usando aprendizajes previos"""
-    # Limitar a 5000 productos para evitar timeout en producción
-    productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}).limit(5000))
-    
-    resultados = []
-    for nombre_buscar in request.nombres:
-        mejor_match = None
-        mejor_score = 0
-        segundo_score = 0
-        aprendido = False
+    """Busca productos similares para cada nombre dado - SIEMPRE devuelve resultados"""
+    try:
+        # Limitar a 5000 productos para evitar timeout
+        productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}).limit(5000))
         
-        # PRIMERO: Buscar en aprendizajes previos
-        aprendizaje = buscar_aprendizaje(nombre_buscar)
-        if aprendizaje:
-            # Buscar el producto por ID guardado
-            producto_aprendido = productos_col.find_one({"_id": ObjectId(aprendizaje["producto_id"])})
-            if producto_aprendido:
-                mejor_match = producto_aprendido
-                mejor_score = 1.0  # Score perfecto porque fue aprendido
-                aprendido = True
+        if not productos:
+            # Si no hay productos, devolver resultados vacíos (no error)
+            return [{
+                "nombre_original": nombre,
+                "producto_sugerido": None,
+                "score": 0,
+                "sospechoso": True,
+                "aprendido": False
+            } for nombre in request.nombres]
         
-        # Si no hay aprendizaje, usar algoritmo de similitud
-        if not aprendido:
-            for prod in productos:
-                score = calcular_similitud(nombre_buscar, prod["nombre"])
-                if score > mejor_score:
-                    segundo_score = mejor_score
-                    mejor_score = score
-                    mejor_match = prod
-                elif score > segundo_score:
-                    segundo_score = score
+        resultados = []
+        for nombre_buscar in request.nombres:
+            mejor_match = None
+            mejor_score = 0
+            segundo_score = 0
+            aprendido = False
+            
+            # PRIMERO: Buscar en aprendizajes previos
+            try:
+                aprendizaje = buscar_aprendizaje(nombre_buscar)
+                if aprendizaje:
+                    producto_aprendido = productos_col.find_one({"_id": ObjectId(aprendizaje["producto_id"])})
+                    if producto_aprendido:
+                        mejor_match = producto_aprendido
+                        mejor_score = 1.0
+                        aprendido = True
+            except Exception as e:
+                print(f"Error buscando aprendizaje: {e}")
+            
+            # Si no hay aprendizaje, usar algoritmo de similitud
+            if not aprendido:
+                for prod in productos:
+                    try:
+                        score = calcular_similitud(nombre_buscar, prod["nombre"])
+                        if score > mejor_score:
+                            segundo_score = mejor_score
+                            mejor_score = score
+                            mejor_match = prod
+                        elif score > segundo_score:
+                            segundo_score = score
+                    except Exception as e:
+                        continue
+            
+            # Determinar si es sospechoso
+            if aprendido:
+                sospechoso = False
+            elif mejor_score < 0.3:
+                sospechoso = True  # Muy bajo, probablemente no encontró
+            elif mejor_score < 0.5:
+                sospechoso = True  # Bajo, necesita revisión
+            else:
+                sospechoso = mejor_score < 0.6 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.8)
+            
+            resultados.append({
+                "nombre_original": nombre_buscar,
+                "producto_sugerido": serialize_doc(mejor_match) if mejor_match else None,
+                "score": round(mejor_score, 3),
+                "sospechoso": sospechoso,
+                "aprendido": aprendido
+            })
         
-        # Determinar si es sospechoso (nunca si fue aprendido)
-        if aprendido:
-            sospechoso = False
-        else:
-            sospechoso = mejor_score < 0.5 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.8)
-        
-        resultados.append({
-            "nombre_original": nombre_buscar,
-            "producto_sugerido": serialize_doc(mejor_match) if mejor_match else None,
-            "score": round(mejor_score, 3),
-            "sospechoso": sospechoso,
-            "aprendido": aprendido
-        })
-    
-    return resultados
+        return resultados
+    except Exception as e:
+        print(f"Error en match_productos: {e}")
+        # En caso de error, devolver resultados vacíos para cada nombre (NO lanzar error)
+        return [{
+            "nombre_original": nombre,
+            "producto_sugerido": None,
+            "score": 0,
+            "sospechoso": True,
+            "aprendido": False
+        } for nombre in request.nombres]
 
 # ==================== HEALTH CHECK ====================
 

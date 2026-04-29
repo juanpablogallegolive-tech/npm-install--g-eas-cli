@@ -32,7 +32,8 @@ interface ProductoMatch {
   score: number;
   sospechoso: boolean;
   aprendido?: boolean;
-  modificado?: boolean; // Si el usuario cambió manualmente
+  modificado?: boolean;
+  noEncontrado?: boolean; // Cuando falla la búsqueda
 }
 
 interface Props {
@@ -208,20 +209,31 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
 
     try {
       const response = await matchProductos(lineasTexto);
-      const resultados: ProductoMatch[] = response.data.map((r, i) => ({
+      const resultados: ProductoMatch[] = response.data.map((r: any, i: number) => ({
         nombre_original: lineasTexto[i],
         nombre_editado: r.producto_sugerido?.nombre || lineasTexto[i],
         producto_sugerido: r.producto_sugerido,
         score: r.score,
         sospechoso: r.sospechoso,
+        aprendido: r.aprendido || false,
       }));
       
       setMatches(resultados);
       setStep('result');
     } catch (error) {
       console.error('Error buscando matches:', error);
-      Alert.alert('Error', 'No se pudo buscar productos similares');
-      setStep('edit');
+      // NO MOSTRAR ERROR - crear matches vacíos para que el usuario los corrija manualmente
+      const resultadosVacios: ProductoMatch[] = lineasTexto.map((linea) => ({
+        nombre_original: linea,
+        nombre_editado: linea,
+        producto_sugerido: null,
+        score: 0,
+        sospechoso: true,
+        aprendido: false,
+        noEncontrado: true, // Marcador especial
+      }));
+      setMatches(resultadosVacios);
+      setStep('result');
     } finally {
       setLoading(false);
     }
