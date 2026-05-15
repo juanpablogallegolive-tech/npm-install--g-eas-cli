@@ -641,117 +641,168 @@ def buscar_palabra_en_texto(palabra: str, texto: str) -> float:
         # Similitud exacta de substring
         if palabra in p or p in palabra:
             score = min(len(palabra), len(p)) / max(len(palabra), len(p))
-            mejor_score = max(mejor_score, score * 0.9)
+            mejor_score = max(mejor_score, score * 0.95)
         
-        # Similitud Levenshtein
+        # Similitud Levenshtein para errores de escritura (uduke/uduque, etc)
         if len(palabra) > 2 and len(p) > 2:
             lev_score = similitud_levenshtein(palabra, p)
-            if lev_score > 0.7:  # Solo si es bastante similar
-                mejor_score = max(mejor_score, lev_score * 0.85)
+            if lev_score > 0.65:  # Más tolerante
+                mejor_score = max(mejor_score, lev_score * 0.9)
     
     return mejor_score
+
+# Palabras importantes (marcas y tipos de productos)
+PALABRAS_IMPORTANTES = {
+    'total', 'uduke', 'uduque', 'udukwe', 'dewalt', 'bosch', 'makita', 'stanley', 'truper', 'discoveri',
+    'aerosol', 'pistola', 'pulidora', 'lijadora', 'sierra', 'taladro', 'compresor',
+    'fumigadora', 'soldador', 'esmeril', 'rotomartillo', 'atornillador', 'dremel',
+    'tijera', 'alicate', 'pinza', 'llave', 'martillo', 'destornillador', 'nivel',
+    'flexometro', 'escuadra', 'serrucho', 'tornillo', 'clavo', 'perno', 'tuerca'
+}
+
+# Colores y características distintivas
+PALABRAS_DISTINTIVAS = {
+    'negro', 'blanco', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'cromado',
+    'brillante', 'mate', 'grande', 'pequeño', 'mediano', 'grueso', 'delgado',
+    'industrial', 'profesional', 'inalambrico', 'electrico', 'manual'
+}
+
+# Variaciones comunes de marcas/palabras
+VARIACIONES_MARCA = {
+    'uduke': ['uduque', 'udukwe', 'uduqe'],
+    'uduque': ['uduke', 'udukwe'],
+    'total': ['totals'],
+    'discoveri': ['discovery', 'discoberi'],
+}
+
+def normalizar_marca(palabra: str) -> str:
+    """Normaliza variaciones de marcas a una forma estándar"""
+    for estandar, variaciones in VARIACIONES_MARCA.items():
+        if palabra == estandar or palabra in variaciones:
+            return estandar
+    return palabra
+
+def palabras_similares(p1: str, p2: str) -> float:
+    """Compara dos palabras considerando variaciones de marca"""
+    # Normalizar ambas
+    p1_norm = normalizar_marca(p1)
+    p2_norm = normalizar_marca(p2)
+    
+    if p1_norm == p2_norm:
+        return 1.0
+    if p1 == p2:
+        return 1.0
+    if p1 in p2:
+        return 0.9
+    if p2 in p1:
+        return 0.85
+    
+    # Levenshtein
+    if len(p1) > 2 and len(p2) > 2:
+        return similitud_levenshtein(p1, p2)
+    return 0.0
 
 def calcular_similitud(busqueda: str, producto_db: str) -> float:
     """
     Calcula similitud avanzada entre texto de búsqueda y producto en DB.
-    Usa sinónimos, n-gramas y múltiples estrategias para mejor matching.
+    Prioriza marcas, tipos de productos y características distintivas.
     Retorna score de 0 a 1.
     """
-    # Normalizar ambos textos
     busq_norm = normalizar_texto(busqueda)
     prod_norm = normalizar_texto(producto_db)
     
     if not busq_norm or not prod_norm:
         return 0.0
     
-    # Match exacto
     if busq_norm == prod_norm:
         return 1.0
     
-    # Expandir sinónimos para comparación
-    busq_expandido = expandir_sinonimos(busq_norm)
-    prod_expandido = expandir_sinonimos(prod_norm)
+    # Separar en palabras
+    palabras_busq = busq_norm.split()
+    palabras_prod = prod_norm.split()
     
-    # Match exacto después de expandir sinónimos
-    if busq_expandido == prod_expandido:
-        return 0.98
+    # Quitar stopwords
+    stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x', 'ref', 'incluye'}
+    palabras_busq = [p for p in palabras_busq if p not in stopwords and len(p) > 1]
+    palabras_prod = [p for p in palabras_prod if p not in stopwords and len(p) > 1]
     
-    score_total = 0.0
+    if not palabras_busq:
+        return 0.0
+    
+    # Calcular coincidencias por categoría
+    coincidencias_importantes = 0
+    coincidencias_distintivas = 0
+    coincidencias_normales = 0
+    
+    total_importantes = 0
+    total_distintivas = 0
+    total_normales = 0
+    
+    for palabra in palabras_busq:
+        palabra_norm = normalizar_marca(palabra)
+        es_importante = any(palabras_similares(palabra_norm, imp) > 0.75 for imp in PALABRAS_IMPORTANTES)
+        es_distintiva = any(palabras_similares(palabra_norm, dist) > 0.75 for dist in PALABRAS_DISTINTIVAS)
+        
+        # Buscar mejor match en producto
+        mejor_score = 0.0
+        for p_prod in palabras_prod:
+            p_prod_norm = normalizar_marca(p_prod)
+            
+            # Usar la nueva función de comparación
+            score = palabras_similares(palabra_norm, p_prod_norm)
+            mejor_score = max(mejor_score, score)
+            
+            # También comparar originales si son diferentes
+            if palabra != palabra_norm or p_prod != p_prod_norm:
+                score2 = palabras_similares(palabra, p_prod)
+                mejor_score = max(mejor_score, score2)
+        
+        # Clasificar según tipo de palabra
+        if es_importante:
+            total_importantes += 1
+            if mejor_score > 0.6:
+                coincidencias_importantes += mejor_score
+        elif es_distintiva:
+            total_distintivas += 1
+            if mejor_score > 0.6:
+                coincidencias_distintivas += mejor_score
+        else:
+            total_normales += 1
+            if mejor_score > 0.5:
+                coincidencias_normales += mejor_score
+    
+    # Calcular score ponderado
+    # Importantes: 40%, Distintivas: 35%, Normales: 25%
+    score = 0.0
     peso_total = 0.0
     
-    # 1. MEDIDAS (muy importante en ferretería) - Peso: 30%
-    medidas_busq = extraer_medidas(busqueda)
-    medidas_prod = extraer_medidas(producto_db)
+    if total_importantes > 0:
+        score += (coincidencias_importantes / total_importantes) * 0.40
+        peso_total += 0.40
     
-    if medidas_busq:
-        peso_medidas = 0.30
-        if medidas_busq & medidas_prod:  # Hay medidas en común
-            coincidencias = len(medidas_busq & medidas_prod)
-            total_medidas = len(medidas_busq)
-            score_medidas = coincidencias / total_medidas
-            score_total += score_medidas * peso_medidas
-        peso_total += peso_medidas
+    if total_distintivas > 0:
+        score += (coincidencias_distintivas / total_distintivas) * 0.35
+        peso_total += 0.35
     
-    # 2. PALABRAS CLAVE CON SINÓNIMOS - Peso: 35%
-    palabras_busq = extraer_palabras_clave(busqueda)
-    palabras_prod = extraer_palabras_clave(producto_db)
+    if total_normales > 0:
+        score += (coincidencias_normales / total_normales) * 0.25
+        peso_total += 0.25
     
-    if palabras_busq:
-        peso_palabras = 0.35
-        score_palabras = 0
-        
-        for palabra in palabras_busq:
-            mejor_match = buscar_palabra_en_texto(palabra, prod_expandido)
-            # También buscar en versión original
-            mejor_match = max(mejor_match, buscar_palabra_en_texto(palabra, prod_norm))
-            score_palabras += mejor_match
-        
-        score_palabras = score_palabras / len(palabras_busq) if palabras_busq else 0
-        score_total += score_palabras * peso_palabras
-        peso_total += peso_palabras
-    
-    # 3. SIMILITUD N-GRAMAS (tolerante a errores de escritura) - Peso: 20%
-    peso_ngramas = 0.20
-    score_ngramas = similitud_ngramas(busq_expandido, prod_expandido, 2)
-    score_total += score_ngramas * peso_ngramas
-    peso_total += peso_ngramas
-    
-    # 4. SIMILITUD LEVENSHTEIN - Peso: 10%
-    peso_general = 0.10
-    score_general = similitud_levenshtein(busq_expandido, prod_expandido)
-    score_total += score_general * peso_general
-    peso_total += peso_general
-    
-    # 5. SUBSTRING MATCH - Peso: 5%
-    peso_substring = 0.05
-    if busq_norm in prod_norm:
-        score_total += 1.0 * peso_substring
-    elif prod_norm in busq_norm:
-        score_total += 0.8 * peso_substring
-    peso_total += peso_substring
-    
-    # Normalizar score final
+    # Normalizar si no hay peso total
     if peso_total > 0:
-        score_final = score_total / peso_total
+        score = score / peso_total
     else:
-        score_final = 0.0
+        # Fallback: calcular promedio simple
+        total_palabras = len(palabras_busq)
+        coincidencias_total = coincidencias_importantes + coincidencias_distintivas + coincidencias_normales
+        score = coincidencias_total / total_palabras if total_palabras > 0 else 0
     
-    # Bonus: primera palabra coincide (tipo de producto)
-    primera_busq = busq_expandido.split()[0] if busq_expandido.split() else ''
-    primera_prod = prod_expandido.split()[0] if prod_expandido.split() else ''
-    if primera_busq and primera_busq == primera_prod and len(primera_busq) > 2:
-        score_final = min(1.0, score_final + 0.12)
+    # Penalizar si falta palabra distintiva (color, tamaño)
+    if total_distintivas > 0 and coincidencias_distintivas == 0:
+        score *= 0.6  # Penalización fuerte
     
-    # Bonus: si contiene todas las palabras importantes
-    if palabras_busq and palabras_prod:
-        palabras_encontradas = sum(1 for p in palabras_busq if any(
-            similitud_levenshtein(p, pp) > 0.8 for pp in palabras_prod
-        ))
-        if palabras_encontradas == len(palabras_busq):
-            score_final = min(1.0, score_final + 0.1)
+    return min(1.0, max(0.0, score))
     
-    return min(1.0, max(0.0, score_final))
-
 class MatchRequest(BaseModel):
     nombres: list[str]
 
@@ -885,7 +936,6 @@ def match_productos(request: MatchRequest):
         productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}).limit(5000))
         
         if not productos:
-            # Si no hay productos, devolver resultados vacíos (no error)
             return [{
                 "nombre_original": nombre,
                 "producto_sugerido": None,
@@ -913,29 +963,69 @@ def match_productos(request: MatchRequest):
             except Exception as e:
                 print(f"Error buscando aprendizaje: {e}")
             
-            # Si no hay aprendizaje, usar algoritmo de similitud
+            # Si no hay aprendizaje, usar algoritmo de similitud mejorado
             if not aprendido:
+                # Normalizar búsqueda
+                busq_norm = normalizar_texto(nombre_buscar)
+                palabras_busq = [p for p in busq_norm.split() if len(p) > 1]
+                
+                # Normalizar marcas en la búsqueda
+                palabras_busq_norm = [normalizar_marca(p) for p in palabras_busq]
+                
                 for prod in productos:
                     try:
-                        score = calcular_similitud(nombre_buscar, prod["nombre"])
+                        prod_norm = normalizar_texto(prod.get("nombre", ""))
+                        palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
+                        
+                        # Calcular coincidencias
+                        coincidencias = 0
+                        total_palabras = len(palabras_busq_norm)
+                        
+                        for p_busq in palabras_busq_norm:
+                            mejor_match_palabra = 0
+                            for p_prod in palabras_prod:
+                                # Exacto
+                                if p_busq == p_prod:
+                                    mejor_match_palabra = 1.0
+                                    break
+                                # Substring
+                                elif p_busq in p_prod or p_prod in p_busq:
+                                    mejor_match_palabra = max(mejor_match_palabra, 0.85)
+                                # Levenshtein para errores tipográficos
+                                elif len(p_busq) > 2 and len(p_prod) > 2:
+                                    sim = similitud_levenshtein(p_busq, p_prod)
+                                    if sim > 0.75:
+                                        mejor_match_palabra = max(mejor_match_palabra, sim)
+                            
+                            coincidencias += mejor_match_palabra
+                        
+                        # Score = promedio de coincidencias
+                        score = coincidencias / total_palabras if total_palabras > 0 else 0
+                        
+                        # Bonus si la primera palabra (tipo de producto) coincide
+                        if palabras_busq_norm and palabras_prod:
+                            if palabras_busq_norm[0] == palabras_prod[0]:
+                                score = min(1.0, score + 0.1)
+                        
                         if score > mejor_score:
                             segundo_score = mejor_score
                             mejor_score = score
                             mejor_match = prod
                         elif score > segundo_score:
                             segundo_score = score
+                            
                     except Exception as e:
                         continue
             
             # Determinar si es sospechoso
             if aprendido:
                 sospechoso = False
-            elif mejor_score < 0.3:
-                sospechoso = True  # Muy bajo, probablemente no encontró
-            elif mejor_score < 0.5:
-                sospechoso = True  # Bajo, necesita revisión
+            elif mejor_score < 0.4:
+                sospechoso = True
+            elif mejor_score < 0.6:
+                sospechoso = True
             else:
-                sospechoso = mejor_score < 0.6 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.8)
+                sospechoso = mejor_score < 0.7 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.85)
             
             resultados.append({
                 "nombre_original": nombre_buscar,
@@ -948,7 +1038,6 @@ def match_productos(request: MatchRequest):
         return resultados
     except Exception as e:
         print(f"Error en match_productos: {e}")
-        # En caso de error, devolver resultados vacíos para cada nombre (NO lanzar error)
         return [{
             "nombre_original": nombre,
             "producto_sugerido": None,
