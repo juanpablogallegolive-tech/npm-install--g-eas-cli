@@ -651,10 +651,15 @@ def buscar_palabra_en_texto(palabra: str, texto: str) -> float:
     
     return mejor_score
 
-# Palabras importantes (marcas y tipos de productos)
+# MARCAS - MUY IMPORTANTES (deben coincidir)
+MARCAS = {
+    'total', 'uduke', 'uduque', 'udukwe', 'dewalt', 'bosch', 'makita', 'stanley', 
+    'truper', 'discoveri', 'discovery', 'vharbor', 'induma', 'pretul', 'surtek',
+    'black', 'decker', 'milwaukee', 'ridgid', 'craftsman', 'hilti', 'metabo'
+}
+
+# Palabras importantes (tipos de productos)
 PALABRAS_IMPORTANTES = {
-    # Marcas
-    'total', 'uduke', 'uduque', 'udukwe', 'dewalt', 'bosch', 'makita', 'stanley', 'truper', 'discoveri', 'vharbor', 'induma',
     # Herramientas eléctricas
     'pulidora', 'lijadora', 'sierra', 'taladro', 'caladora', 'ingletadora', 'rotomartillo', 'atornillador', 'esmeril',
     'amoladora', 'cortadora', 'fresadora', 'cepilladora', 'router', 'dremel', 'minipulidora',
@@ -664,7 +669,7 @@ PALABRAS_IMPORTANTES = {
     'orbital', 'inalambrica', 'inalambrico', 'electrica', 'electrico', 'telescopica', 'impacto', 'expansion',
     # Productos varios
     'aerosol', 'pistola', 'fumigadora', 'compresor', 'soldador', 'tornillo', 'clavo', 'perno', 'tuerca', 'lamina',
-    # Medidas y unidades (muy importantes)
+    # Medidas y unidades
     'pulgadas', 'pulgada', 'pul', 'mm', 'kg', 'litros', 'litro'
 }
 
@@ -1012,23 +1017,52 @@ def match_productos(request: MatchRequest):
                 stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
                 palabras_busq = [p for p in palabras_busq if p not in stopwords]
                 
+                # DETECTAR MARCA EN LA BÚSQUEDA
+                marca_buscada = None
+                for p in palabras_busq:
+                    p_norm = normalizar_marca(p)
+                    if p_norm in MARCAS or p in MARCAS:
+                        marca_buscada = p_norm
+                        break
+                
                 # Normalizar marcas y variaciones
                 palabras_busq_norm = []
                 for p in palabras_busq:
                     p_norm = normalizar_marca(p)
                     palabras_busq_norm.append(p_norm)
-                    # Agregar variaciones
                     if p_norm in VARIACIONES_MARCA:
-                        for var in VARIACIONES_MARCA[p_norm][:2]:  # Solo 2 variaciones
+                        for var in VARIACIONES_MARCA[p_norm][:2]:
                             if var not in palabras_busq_norm:
                                 palabras_busq_norm.append(var)
                 
                 for prod in productos:
                     try:
-                        # Expandir fracciones en producto también
                         prod_expandido = expandir_fracciones(prod.get("nombre", ""))
                         prod_norm = normalizar_texto(prod_expandido)
                         palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
+                        
+                        # DETECTAR MARCA EN EL PRODUCTO
+                        marca_producto = None
+                        for p in palabras_prod:
+                            if p in MARCAS:
+                                marca_producto = p
+                                break
+                        
+                        # SI HAY MARCA BUSCADA, VERIFICAR QUE COINCIDA
+                        if marca_buscada:
+                            marca_coincide = False
+                            if marca_producto:
+                                # Comparar marcas (considerando variaciones)
+                                if marca_buscada == marca_producto:
+                                    marca_coincide = True
+                                elif marca_buscada in VARIACIONES_MARCA and marca_producto in VARIACIONES_MARCA.get(marca_buscada, []):
+                                    marca_coincide = True
+                                elif marca_producto in VARIACIONES_MARCA and marca_buscada in VARIACIONES_MARCA.get(marca_producto, []):
+                                    marca_coincide = True
+                            
+                            # Si la marca no coincide, penalizar MUCHO
+                            if not marca_coincide:
+                                continue  # Saltar este producto completamente
                         
                         # Calcular coincidencias
                         coincidencias = 0
@@ -1036,10 +1070,10 @@ def match_productos(request: MatchRequest):
                         palabras_criticas_total = 0
                         
                         for p_busq in palabras_busq_norm:
-                            # Verificar si es palabra crítica (número, medida, marca)
                             es_critica = (p_busq.isdigit() or 
                                          p_busq in PALABRAS_IMPORTANTES or 
                                          p_busq in UNIDADES_CRITICAS or
+                                         p_busq in MARCAS or
                                          any(c.isdigit() for c in p_busq))
                             
                             if es_critica:
@@ -1062,19 +1096,22 @@ def match_productos(request: MatchRequest):
                             
                             coincidencias += mejor_match_palabra
                         
-                        # Score base
                         total_palabras = len(palabras_busq_norm)
                         score = coincidencias / total_palabras if total_palabras > 0 else 0
                         
-                        # PENALIZAR si no encuentra palabras críticas (números, medidas)
+                        # BONUS por marca correcta
+                        if marca_buscada and marca_producto and (marca_buscada == marca_producto or 
+                            normalizar_marca(marca_buscada) == normalizar_marca(marca_producto)):
+                            score = min(1.0, score + 0.15)
+                        
+                        # Penalizar si no encuentra palabras críticas
                         if palabras_criticas_total > 0:
                             ratio_criticas = palabras_criticas_encontradas / palabras_criticas_total
                             if ratio_criticas < 0.5:
-                                score *= 0.5  # Penalización fuerte
+                                score *= 0.5
                             elif ratio_criticas < 0.8:
-                                score *= 0.8  # Penalización moderada
+                                score *= 0.8
                         
-                        # Bonus si primera palabra coincide
                         if palabras_busq and palabras_prod:
                             if normalizar_marca(palabras_busq[0]) == normalizar_marca(palabras_prod[0]):
                                 score = min(1.0, score + 0.1)
