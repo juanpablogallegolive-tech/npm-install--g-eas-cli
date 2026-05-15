@@ -179,9 +179,66 @@ def count_productos():
 
 @app.get("/api/productos/buscar")
 def buscar_productos(q: str, limit: int = 200):
-    regex = {"$regex": q, "$options": "i"}
-    productos = list(productos_col.find({"nombre": regex}).limit(limit))
-    return [serialize_doc(p) for p in productos]
+    """Búsqueda inteligente de productos - funciona con palabras en desorden y variaciones"""
+    if not q or len(q.strip()) == 0:
+        return []
+    
+    # Normalizar query
+    query_norm = normalizar_texto(q)
+    palabras_query = set(query_norm.split())
+    
+    # Quitar palabras muy cortas
+    palabras_query = {p for p in palabras_query if len(p) > 1}
+    
+    if not palabras_query:
+        # Si no hay palabras válidas, usar regex simple
+        regex = {"$regex": q, "$options": "i"}
+        productos = list(productos_col.find({"nombre": regex}).limit(limit))
+        return [serialize_doc(p) for p in productos]
+    
+    # Obtener productos para búsqueda inteligente
+    productos = list(productos_col.find().limit(5000))
+    
+    resultados = []
+    for prod in productos:
+        nombre_norm = normalizar_texto(prod.get("nombre", ""))
+        palabras_prod = set(nombre_norm.split())
+        
+        # Calcular score basado en palabras coincidentes
+        coincidencias = 0
+        coincidencias_parciales = 0
+        
+        for palabra_q in palabras_query:
+            # Coincidencia exacta
+            if palabra_q in palabras_prod:
+                coincidencias += 1
+            else:
+                # Coincidencia parcial (substring o similitud)
+                for palabra_p in palabras_prod:
+                    # Substring
+                    if palabra_q in palabra_p or palabra_p in palabra_q:
+                        coincidencias_parciales += 0.7
+                        break
+                    # Similitud alta (para variaciones como zinc/zincado)
+                    elif similitud_levenshtein(palabra_q, palabra_p) > 0.75:
+                        coincidencias_parciales += 0.6
+                        break
+        
+        total_coincidencias = coincidencias + coincidencias_parciales
+        
+        if total_coincidencias > 0:
+            # Score = coincidencias / total palabras buscadas
+            score = total_coincidencias / len(palabras_query)
+            resultados.append({
+                "producto": prod,
+                "score": score
+            })
+    
+    # Ordenar por score descendente
+    resultados.sort(key=lambda x: x["score"], reverse=True)
+    
+    # Devolver top resultados
+    return [serialize_doc(r["producto"]) for r in resultados[:limit]]
 
 @app.get("/api/productos/{producto_id}")
 def get_producto(producto_id: str):
