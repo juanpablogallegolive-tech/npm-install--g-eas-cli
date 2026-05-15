@@ -535,11 +535,23 @@ export default function QuotesScreen() {
           <Card.Content>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Productos</Text>
-              <View style={{ flexDirection: 'row' }}>
-                <IconButton icon="text-recognition" size={24} onPress={() => setLectorVisible(true)} mode="contained" containerColor="#4caf50" iconColor="#fff" />
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <IconButton icon="plus" size={24} onPress={agregarFila} mode="contained" />
               </View>
             </View>
+
+            {/* Botón grande para escanear/pegar lista */}
+            <TouchableOpacity 
+              style={styles.lectorButton} 
+              onPress={() => setLectorVisible(true)}
+            >
+              <IconButton icon="text-recognition" size={28} iconColor="#fff" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lectorButtonText}>Escanear / Pegar Lista</Text>
+                <Text style={styles.lectorButtonDesc}>Agrega varios productos a la vez</Text>
+              </View>
+              <IconButton icon="chevron-right" size={24} iconColor="#fff" />
+            </TouchableOpacity>
 
             {items.map((item, index) => (
               <View key={index} style={styles.itemCard}>
@@ -776,4 +788,21 @@ const styles = StyleSheet.create({
   loadingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   loadingText: { marginLeft: 12, color: '#666' },
   progressBar: { height: 6, borderRadius: 3 },
+  lectorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4caf50',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  lectorButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  lectorButtonDesc: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+  },
 });
