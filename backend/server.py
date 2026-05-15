@@ -653,19 +653,30 @@ def buscar_palabra_en_texto(palabra: str, texto: str) -> float:
 
 # Palabras importantes (marcas y tipos de productos)
 PALABRAS_IMPORTANTES = {
-    'total', 'uduke', 'uduque', 'udukwe', 'dewalt', 'bosch', 'makita', 'stanley', 'truper', 'discoveri',
-    'aerosol', 'pistola', 'pulidora', 'lijadora', 'sierra', 'taladro', 'compresor',
-    'fumigadora', 'soldador', 'esmeril', 'rotomartillo', 'atornillador', 'dremel',
-    'tijera', 'alicate', 'pinza', 'llave', 'martillo', 'destornillador', 'nivel',
-    'flexometro', 'escuadra', 'serrucho', 'tornillo', 'clavo', 'perno', 'tuerca'
+    # Marcas
+    'total', 'uduke', 'uduque', 'udukwe', 'dewalt', 'bosch', 'makita', 'stanley', 'truper', 'discoveri', 'vharbor', 'induma',
+    # Herramientas eléctricas
+    'pulidora', 'lijadora', 'sierra', 'taladro', 'caladora', 'ingletadora', 'rotomartillo', 'atornillador', 'esmeril',
+    'amoladora', 'cortadora', 'fresadora', 'cepilladora', 'router', 'dremel', 'minipulidora',
+    # Herramientas manuales  
+    'martillo', 'destornillador', 'llave', 'alicate', 'pinza', 'tenaza', 'tijera', 'serrucho', 'escuadra', 'nivel', 'flexometro',
+    # Tipos específicos
+    'orbital', 'inalambrica', 'inalambrico', 'electrica', 'electrico', 'telescopica', 'impacto', 'expansion',
+    # Productos varios
+    'aerosol', 'pistola', 'fumigadora', 'compresor', 'soldador', 'tornillo', 'clavo', 'perno', 'tuerca', 'lamina',
+    # Medidas y unidades (muy importantes)
+    'pulgadas', 'pulgada', 'pul', 'mm', 'kg', 'litros', 'litro'
 }
 
 # Colores y características distintivas
 PALABRAS_DISTINTIVAS = {
-    'negro', 'blanco', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'cromado',
-    'brillante', 'mate', 'grande', 'pequeño', 'mediano', 'grueso', 'delgado',
-    'industrial', 'profesional', 'inalambrico', 'electrico', 'manual'
+    'negro', 'blanco', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'cromado', 'dorado', 'plateado',
+    'brillante', 'mate', 'grande', 'pequeño', 'mediano', 'grueso', 'delgado', 'pequeña', 'gruesa', 'delgada',
+    'industrial', 'profesional', 'manual', 'encauchetada', 'encauchetado', 'plana', 'plano'
 }
+
+# Unidades y medidas numéricas que son críticas
+UNIDADES_CRITICAS = {'w', 'v', 'mm', 'kg', 'pul', 'pulgadas', 'pulgada', 'litros', 'nm'}
 
 # Variaciones comunes de marcas/palabras
 VARIACIONES_MARCA = {
@@ -673,7 +684,36 @@ VARIACIONES_MARCA = {
     'uduque': ['uduke', 'udukwe'],
     'total': ['totals'],
     'discoveri': ['discovery', 'discoberi'],
+    'pulgadas': ['pul', 'pulgada', 'pulg'],
+    'pulgada': ['pul', 'pulgadas', 'pulg'],
+    'pul': ['pulgadas', 'pulgada'],
+    'electrica': ['eletrica', 'electrico', 'eletrico'],
+    'inalambrica': ['inalambrico', 'inalamb'],
+    'caladora': ['caladorea'],
+    'expansion': ['espancion', 'expansión'],
+    # Fracciones importantes
+    '3/8': ['3 octavos', 'tres octavos', '3octavos'],
+    '1/4': ['1 cuarto', 'un cuarto', 'cuarto', '1cuarto'],
+    '1/2': ['media', 'medio', '1 media'],
+    '3/4': ['3 cuartos', 'tres cuartos', '3cuartos'],
+    '1/8': ['1 octavo', 'un octavo', 'octavo'],
+    # Tipos de cabeza
+    'plana': ['av', 'avellanado', 'avellanada', 'plano'],
+    'cabeza': ['cab', 'c'],
+    'ph': ['phillips', 'philips'],
 }
+
+# Convertir fracciones a palabras para búsqueda
+def expandir_fracciones(texto: str) -> str:
+    """Expande fracciones numéricas a palabras"""
+    texto = texto.replace('3/8', ' 3 octavos ')
+    texto = texto.replace('1/4', ' 1 cuarto ')
+    texto = texto.replace('1/2', ' media ')
+    texto = texto.replace('3/4', ' 3 cuartos ')
+    texto = texto.replace('1/8', ' 1 octavo ')
+    texto = texto.replace('5/8', ' 5 octavos ')
+    texto = texto.replace('7/8', ' 7 octavos ')
+    return texto
 
 def normalizar_marca(palabra: str) -> str:
     """Normaliza variaciones de marcas a una forma estándar"""
@@ -932,7 +972,6 @@ def eliminar_aprendizaje(id: str):
 def match_productos(request: MatchRequest):
     """Busca productos similares para cada nombre dado - SIEMPRE devuelve resultados"""
     try:
-        # Limitar a 5000 productos para evitar timeout
         productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}).limit(5000))
         
         if not productos:
@@ -963,48 +1002,81 @@ def match_productos(request: MatchRequest):
             except Exception as e:
                 print(f"Error buscando aprendizaje: {e}")
             
-            # Si no hay aprendizaje, usar algoritmo de similitud mejorado
             if not aprendido:
-                # Normalizar búsqueda
-                busq_norm = normalizar_texto(nombre_buscar)
+                # Expandir fracciones y normalizar búsqueda
+                busq_expandido = expandir_fracciones(nombre_buscar)
+                busq_norm = normalizar_texto(busq_expandido)
                 palabras_busq = [p for p in busq_norm.split() if len(p) > 1]
                 
-                # Normalizar marcas en la búsqueda
-                palabras_busq_norm = [normalizar_marca(p) for p in palabras_busq]
+                # Quitar stopwords
+                stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
+                palabras_busq = [p for p in palabras_busq if p not in stopwords]
+                
+                # Normalizar marcas y variaciones
+                palabras_busq_norm = []
+                for p in palabras_busq:
+                    p_norm = normalizar_marca(p)
+                    palabras_busq_norm.append(p_norm)
+                    # Agregar variaciones
+                    if p_norm in VARIACIONES_MARCA:
+                        for var in VARIACIONES_MARCA[p_norm][:2]:  # Solo 2 variaciones
+                            if var not in palabras_busq_norm:
+                                palabras_busq_norm.append(var)
                 
                 for prod in productos:
                     try:
-                        prod_norm = normalizar_texto(prod.get("nombre", ""))
+                        # Expandir fracciones en producto también
+                        prod_expandido = expandir_fracciones(prod.get("nombre", ""))
+                        prod_norm = normalizar_texto(prod_expandido)
                         palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
                         
                         # Calcular coincidencias
                         coincidencias = 0
-                        total_palabras = len(palabras_busq_norm)
+                        palabras_criticas_encontradas = 0
+                        palabras_criticas_total = 0
                         
                         for p_busq in palabras_busq_norm:
+                            # Verificar si es palabra crítica (número, medida, marca)
+                            es_critica = (p_busq.isdigit() or 
+                                         p_busq in PALABRAS_IMPORTANTES or 
+                                         p_busq in UNIDADES_CRITICAS or
+                                         any(c.isdigit() for c in p_busq))
+                            
+                            if es_critica:
+                                palabras_criticas_total += 1
+                            
                             mejor_match_palabra = 0
                             for p_prod in palabras_prod:
-                                # Exacto
                                 if p_busq == p_prod:
                                     mejor_match_palabra = 1.0
                                     break
-                                # Substring
                                 elif p_busq in p_prod or p_prod in p_busq:
                                     mejor_match_palabra = max(mejor_match_palabra, 0.85)
-                                # Levenshtein para errores tipográficos
                                 elif len(p_busq) > 2 and len(p_prod) > 2:
                                     sim = similitud_levenshtein(p_busq, p_prod)
                                     if sim > 0.75:
                                         mejor_match_palabra = max(mejor_match_palabra, sim)
                             
+                            if es_critica and mejor_match_palabra > 0.7:
+                                palabras_criticas_encontradas += 1
+                            
                             coincidencias += mejor_match_palabra
                         
-                        # Score = promedio de coincidencias
+                        # Score base
+                        total_palabras = len(palabras_busq_norm)
                         score = coincidencias / total_palabras if total_palabras > 0 else 0
                         
-                        # Bonus si la primera palabra (tipo de producto) coincide
-                        if palabras_busq_norm and palabras_prod:
-                            if palabras_busq_norm[0] == palabras_prod[0]:
+                        # PENALIZAR si no encuentra palabras críticas (números, medidas)
+                        if palabras_criticas_total > 0:
+                            ratio_criticas = palabras_criticas_encontradas / palabras_criticas_total
+                            if ratio_criticas < 0.5:
+                                score *= 0.5  # Penalización fuerte
+                            elif ratio_criticas < 0.8:
+                                score *= 0.8  # Penalización moderada
+                        
+                        # Bonus si primera palabra coincide
+                        if palabras_busq and palabras_prod:
+                            if normalizar_marca(palabras_busq[0]) == normalizar_marca(palabras_prod[0]):
                                 score = min(1.0, score + 0.1)
                         
                         if score > mejor_score:
