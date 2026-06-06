@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -58,6 +58,8 @@ export default function QuotesScreen() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState('');
+  
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadCotizaciones();
@@ -99,14 +101,20 @@ export default function QuotesScreen() {
     setSearchingIndex(index);
     setSearchQuery(query);
     
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
     if (query.length >= 1) {
-      try {
-        const response = await productosApi.search(query);
-        setSearchResults(response.data);
-        setShowResults(true);
-      } catch (error) {
-        console.error('Error en búsqueda:', error);
-      }
+      searchTimeoutRef.current = setTimeout(async () => {
+        try {
+          const response = await productosApi.search(query);
+          setSearchResults(response.data);
+          setShowResults(true);
+        } catch (error) {
+          console.error('Error en búsqueda:', error);
+        }
+      }, 400);
     } else {
       setSearchResults([]);
       setShowResults(false);
@@ -122,6 +130,9 @@ export default function QuotesScreen() {
     setShowResults(false);
     setSearchQuery('');
     setSearchingIndex(null);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
     Keyboard.dismiss();
   };
 

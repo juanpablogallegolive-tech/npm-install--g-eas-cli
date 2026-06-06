@@ -1247,6 +1247,28 @@ def match_productos(request: MatchRequest):
                 "sospechoso": True,
                 "aprendido": False
             } for nombre in request.nombres]
+            
+        # PRE-PROCESAR PRODUCTOS PARA EVITAR TIMEOUTS
+        productos_procesados = []
+        for prod in productos:
+            try:
+                prod_expandido = expandir_fracciones(prod.get("nombre", ""))
+                prod_norm = normalizar_texto(prod_expandido)
+                palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
+                
+                marca_producto = None
+                for p in palabras_prod:
+                    if p in MARCAS:
+                        marca_producto = p
+                        break
+                        
+                productos_procesados.append({
+                    "raw": prod,
+                    "palabras_prod": palabras_prod,
+                    "marca_producto": marca_producto
+                })
+            except Exception:
+                continue
         
         resultados = []
         for nombre_buscar in request.nombres:
@@ -1295,18 +1317,11 @@ def match_productos(request: MatchRequest):
                             if var not in palabras_busq_norm:
                                 palabras_busq_norm.append(var)
                 
-                for prod in productos:
+                for prod_data in productos_procesados:
                     try:
-                        prod_expandido = expandir_fracciones(prod.get("nombre", ""))
-                        prod_norm = normalizar_texto(prod_expandido)
-                        palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
-                        
-                        # DETECTAR MARCA EN EL PRODUCTO
-                        marca_producto = None
-                        for p in palabras_prod:
-                            if p in MARCAS:
-                                marca_producto = p
-                                break
+                        prod = prod_data["raw"]
+                        palabras_prod = prod_data["palabras_prod"]
+                        marca_producto = prod_data["marca_producto"]
                         
                         # SI HAY MARCA BUSCADA, VERIFICAR QUE COINCIDA
                         if marca_buscada:

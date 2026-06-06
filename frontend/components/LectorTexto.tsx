@@ -58,6 +58,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
   
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<any>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const resetear = () => {
     setStep('input');
@@ -68,18 +69,28 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     setEditandoIndex(null);
     setBusquedaProducto('');
     setResultadosBusqueda([]);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
   };
 
-  // Buscar productos para cambiar
+  // Buscar productos para cambiar (con debounce)
   const buscarProductoParaCambiar = async (query: string) => {
     setBusquedaProducto(query);
+    
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
     if (query.length >= 1) {
-      try {
-        const response = await productosApi.search(query);
-        setResultadosBusqueda(response.data.slice(0, 20));
-      } catch (error) {
-        console.error('Error buscando:', error);
-      }
+      searchTimeoutRef.current = setTimeout(async () => {
+        try {
+          const response = await productosApi.search(query);
+          setResultadosBusqueda(response.data.slice(0, 20));
+        } catch (error) {
+          console.error('Error buscando:', error);
+        }
+      }, 400);
     } else {
       setResultadosBusqueda([]);
     }
@@ -117,6 +128,9 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     setEditandoIndex(null);
     setBusquedaProducto('');
     setResultadosBusqueda([]);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
     
     Alert.alert('✓ Aprendizaje guardado', `La IA recordará que "${match.nombre_original}" = "${nuevoProducto.nombre}"`);
   };
