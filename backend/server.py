@@ -34,6 +34,14 @@ calculos_col = db["calculos"]
 cotizaciones_col = db["cotizaciones"]
 aprendizajes_col = db["aprendizajes"]  # Para aprendizaje de IA
 
+# Evento de inicio para cargar sinónimos dinámicos
+@app.on_event("startup")
+async def startup_event():
+    try:
+        extraer_sinonimos_dinamicos()
+    except Exception as e:
+        print(f"⚠️ No se pudieron cargar sinónimos dinámicos al inicio: {e}")
+
 # ==================== MODELS ====================
 
 class PyObjectId(ObjectId):
@@ -523,6 +531,45 @@ for palabra, sinonimos in SINONIMOS.items():
     for sin in sinonimos:
         SINONIMOS_INVERSO[sin.split()[0]] = palabra  # Solo primera palabra
 
+# Sinónimos dinámicos aprendidos de las correcciones del usuario
+SINONIMOS_DINAMICOS = {}
+
+def normalizar_medidas(texto: str) -> str:
+    """Normaliza medidas escritas y formatos alternativos a fracciones estándar"""
+    # Convertir "1 4", "1-4", "1_4" a "1/4" etc para denominadores comunes
+    texto = re.sub(r'\b(\d+)[\s\-_]+(2|3|4|8|16|32|64)\b', r'\1/\2', texto)
+    
+    # "1 y 1/2" -> "1 1/2"
+    texto = re.sub(r'\b(\d+)\s+y\s+(\d+/\d+)\b', r'\1 \2', texto)
+    
+    reemplazos = {
+        r'\bun tercio\b': '1/3', r'\b1 tercio\b': '1/3', r'\btercio\b': '1/3',
+        r'\bdos tercios\b': '2/3', r'\b2 tercios\b': '2/3',
+        r'\bun cuarto\b': '1/4', r'\b1 cuarto\b': '1/4', r'\bcuarto\b': '1/4',
+        r'\btres cuartos\b': '3/4', r'\b3 cuartos\b': '3/4',
+        r'\bun medio\b': '1/2', r'\b1 medio\b': '1/2', r'\bmedio\b': '1/2', r'\bmedia\b': '1/2', r'\bmitad\b': '1/2',
+        r'\bun octavo\b': '1/8', r'\b1 octavo\b': '1/8', r'\boctavo\b': '1/8',
+        r'\btres octavos\b': '3/8', r'\b3 octavos\b': '3/8',
+        r'\bcinco octavos\b': '5/8', r'\b5 octavos\b': '5/8',
+        r'\bsiete octavos\b': '7/8', r'\b7 octavos\b': '7/8',
+        r'\bun dieciseisavo\b': '1/16', r'\b1 dieciseisavo\b': '1/16', r'\bdieciseisavo\b': '1/16',
+        r'\btres dieciseisavos\b': '3/16', r'\b3 dieciseisavos\b': '3/16',
+        r'\bcinco dieciseisavos\b': '5/16', r'\b5 dieciseisavos\b': '5/16',
+        r'\bsiete dieciseisavos\b': '7/16', r'\b7 dieciseisavos\b': '7/16',
+        r'\bnueve dieciseisavos\b': '9/16', r'\b9 dieciseisavos\b': '9/16',
+        r'\bonce dieciseisavos\b': '11/16', r'\b11 dieciseisavos\b': '11/16',
+        r'\btrece dieciseisavos\b': '13/16', r'\b13 dieciseisavos\b': '13/16',
+        r'\bquince dieciseisavos\b': '15/16', r'\b15 dieciseisavos\b': '15/16',
+        r'\bun treinta y dosavo\b': '1/32', r'\b1 treinta y dosavo\b': '1/32', r'\btreinta y dosavo\b': '1/32',
+        r'\b0\.125\b': '1/8', r'\b0\.25\b': '1/4', r'\b0\.375\b': '3/8', r'\b0\.50?\b': '1/2',
+        r'\b0\.625\b': '5/8', r'\b0\.75\b': '3/4', r'\b0\.875\b': '7/8'
+    }
+    
+    for patron, reemplazo in reemplazos.items():
+        texto = re.sub(patron, reemplazo, texto)
+        
+    return texto
+
 def normalizar_texto(texto: str) -> str:
     """Normaliza texto: quita acentos, minúsculas, limpia caracteres especiales"""
     if not texto:
@@ -530,6 +577,9 @@ def normalizar_texto(texto: str) -> str:
     texto = unicodedata.normalize('NFD', texto)
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     texto = texto.lower().strip()
+    
+    texto = normalizar_medidas(texto)
+    
     texto = re.sub(r'[^a-z0-9\s/x\-\.]', ' ', texto)
     texto = re.sub(r'\s+', ' ', texto)
     return texto.strip()
@@ -727,9 +777,149 @@ def normalizar_marca(palabra: str) -> str:
             return estandar
     return palabra
 
+def extraer_sinonimos_dinamicos():
+    """
+    Analiza todos los aprendizajes/correcciones del usuario guardados en la base de datos
+    y extrae sinónimos a nivel de palabra utilizando alineación de prefijos y similitud fuzzy.
+    """
+    global SINONIMOS_DINAMICOS, SINONIMOS_INVERSO
+    mapa = {}
+    cooc_counts = {}
+    aw_counts = {}
+    
+    try:
+        aprendizajes = list(aprendizajes_col.find({}))
+        
+        for apr in aprendizajes:
+            corr_norm = normalizar_texto(apr.get("nombre_producto", ""))
+            corr_words = [w for w in corr_norm.split() if len(w) > 1]
+            
+            for alias in apr.get("aliases_normalizados", []):
+                alias_words = [w for w in alias.split() if len(w) > 1]
+                
+                stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
+                corr_words_clean = [w for w in corr_words if w not in stopwords]
+                alias_words_clean = [w for w in alias_words if w not in stopwords]
+                
+                unmatched_alias = []
+                unmatched_corr = list(corr_words_clean)
+                
+                for aw in alias_words_clean:
+                    match_found = False
+                    for cw in list(unmatched_corr):
+                        if aw == cw or similitud_levenshtein(aw, cw) > 0.85:
+                            unmatched_corr.remove(cw)
+                            match_found = True
+                            break
+                    if not match_found:
+                        unmatched_alias.append(aw)
+                
+                paired_alias = set()
+                paired_corr = set()
+                
+                for aw in unmatched_alias:
+                    best_cw = None
+                    best_score = 0.0
+                    for cw in unmatched_corr:
+                        if cw in paired_corr:
+                            continue
+                        is_prefix = (cw.startswith(aw) or aw.startswith(cw)) and len(min(aw, cw, key=len)) >= 3
+                        score = 0.9 if is_prefix else similitud_levenshtein(aw, cw)
+                        if score > best_score and score >= 0.5:
+                            best_score = score
+                            best_cw = cw
+                    
+                    if best_cw:
+                        paired_alias.add(aw)
+                        paired_corr.add(best_cw)
+                        for w1, w2 in [(aw, best_cw), (best_cw, aw)]:
+                            if w1 not in mapa:
+                                mapa[w1] = []
+                            if w2 not in mapa[w1]:
+                                mapa[w1].append(w2)
+                
+                remaining_alias = [w for w in unmatched_alias if w not in paired_alias]
+                remaining_corr = [w for w in unmatched_corr if w not in paired_corr]
+                
+                if len(remaining_alias) == 1 and len(remaining_corr) == 1:
+                    w1, w2 = remaining_alias[0], remaining_corr[0]
+                    for x, y in [(w1, w2), (w2, w1)]:
+                        if x not in mapa:
+                            mapa[x] = []
+                        if y not in mapa[x]:
+                            mapa[x].append(y)
+                
+                elif len(remaining_alias) > 0 and len(remaining_corr) > 0:
+                    for aw in remaining_alias:
+                        aw_counts[aw] = aw_counts.get(aw, 0) + 1
+                        for cw in remaining_corr:
+                            pair = (aw, cw)
+                            cooc_counts[pair] = cooc_counts.get(pair, 0) + 1
+        
+        for (aw, cw), count in cooc_counts.items():
+            if count >= 2:
+                prob = count / aw_counts[aw]
+                if prob >= 0.4:
+                    for x, y in [(aw, cw), (cw, aw)]:
+                        if x not in mapa:
+                            mapa[x] = []
+                        if y not in mapa[x]:
+                            mapa[x].append(y)
+                            
+        SINONIMOS_DINAMICOS = mapa
+        
+        SINONIMOS_INVERSO.clear()
+        for palabra, sinonimos in SINONIMOS.items():
+            SINONIMOS_INVERSO[palabra] = palabra
+            for sin in sinonimos:
+                SINONIMOS_INVERSO[sin.split()[0]] = palabra
+                
+        for canonical, alts in SINONIMOS_DINAMICOS.items():
+            for alt in alts:
+                first_word = alt.split()[0]
+                if first_word not in SINONIMOS_INVERSO:
+                    SINONIMOS_INVERSO[first_word] = canonical
+                    
+        print(f"🧠 [IA] Se cargaron {len(mapa)} sinónimos dinámicos de {len(aprendizajes)} correcciones.")
+    except Exception as e:
+        print(f"❌ Error extrayendo sinónimos dinámicos: {e}")
+
+def son_sinonimos(p1: str, p2: str) -> bool:
+    """Verifica si dos palabras son sinónimos (predefinidos o aprendidos)"""
+    p1_norm = normalizar_marca(p1)
+    p2_norm = normalizar_marca(p2)
+    
+    if p1_norm == p2_norm:
+        return True
+        
+    COLORES = {'blanco', 'negro', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'dorado', 'plateado', 'bronce', 'cafe', 'naranja', 'morado', 'rosa', 'transparente'}
+    VARIOS = {'varios', 'surtido', 'surtidos', 'multicolor'}
+    
+    es_color1 = p1_norm in COLORES or (p1_norm in SINONIMOS_INVERSO and SINONIMOS_INVERSO[p1_norm] in COLORES)
+    es_color2 = p2_norm in COLORES or (p2_norm in SINONIMOS_INVERSO and SINONIMOS_INVERSO[p2_norm] in COLORES)
+    
+    if (es_color1 and p2_norm in VARIOS) or (es_color2 and p1_norm in VARIOS):
+        return True
+
+    if p1_norm in SINONIMOS and p2_norm in SINONIMOS[p1_norm]:
+        return True
+    if p2_norm in SINONIMOS and p1_norm in SINONIMOS[p2_norm]:
+        return True
+        
+    if p1_norm in SINONIMOS_DINAMICOS and p2_norm in SINONIMOS_DINAMICOS[p1_norm]:
+        return True
+    if p2_norm in SINONIMOS_DINAMICOS and p1_norm in SINONIMOS_DINAMICOS[p2_norm]:
+        return True
+        
+    canon1 = SINONIMOS_INVERSO.get(p1_norm)
+    canon2 = SINONIMOS_INVERSO.get(p2_norm)
+    if canon1 and canon2 and canon1 == canon2:
+        return True
+        
+    return False
+
 def palabras_similares(p1: str, p2: str) -> float:
-    """Compara dos palabras considerando variaciones de marca"""
-    # Normalizar ambas
+    """Compara dos palabras considerando variaciones de marca y sinónimos"""
     p1_norm = normalizar_marca(p1)
     p2_norm = normalizar_marca(p2)
     
@@ -737,6 +927,11 @@ def palabras_similares(p1: str, p2: str) -> float:
         return 1.0
     if p1 == p2:
         return 1.0
+        
+    # Verificar sinónimos (estáticos y dinámicos)
+    if son_sinonimos(p1, p2):
+        return 0.95
+        
     if p1 in p2:
         return 0.9
     if p2 in p1:
