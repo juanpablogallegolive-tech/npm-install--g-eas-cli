@@ -205,6 +205,22 @@ def buscar_productos(q: str, limit: int = 200):
         productos = list(productos_col.find({"nombre": regex}).limit(limit))
         return [serialize_doc(p) for p in productos]
     
+    # 1. Buscar si hay una corrección/aprendizaje previo para esta búsqueda
+    aprendizaje = buscar_aprendizaje(q)
+    id_aprendido = None
+    resultados = []
+    if aprendizaje:
+        try:
+            prod_aprendido = productos_col.find_one({"_id": ObjectId(aprendizaje["producto_id"])})
+            if prod_aprendido:
+                id_aprendido = str(prod_aprendido["_id"])
+                resultados.append({
+                    "producto": prod_aprendido,
+                    "score": 1.1  # Score especial para ponerlo de primero
+                })
+        except Exception as e:
+            print(f"Error cargando producto aprendido: {e}")
+    
     # Expandir sinónimos en la búsqueda
     palabras_expandidas = []
     for p in palabras_query:
@@ -213,11 +229,26 @@ def buscar_productos(q: str, limit: int = 200):
         if p in SINONIMOS_INVERSO:
             palabras_expandidas.append(SINONIMOS_INVERSO[p])
     
+    # Determinar el "sujeto" principal (el objeto central, ej: "arandela", "tubo")
+    sujeto_principal = None
+    unidades = {'mm', 'cm', 'pul', 'pulg', 'pulgada', 'pulgadas'}
+    for p in palabras_query:
+        if len(p) > 2 and not p.isdigit() and not re.match(r'^\d', p) and p not in unidades:
+            sujeto_principal = p
+            break
+    
+    expansiones_sujeto = []
+    if sujeto_principal:
+        expansiones_sujeto = expandir_sinonimos(sujeto_principal).split()
+    
     # Obtener productos para búsqueda inteligente
     productos = list(productos_col.find().limit(5000))
     
-    resultados = []
     for prod in productos:
+        # Evitar duplicar el producto aprendido
+        if id_aprendido and str(prod["_id"]) == id_aprendido:
+            continue
+            
         nombre_norm = normalizar_texto(prod.get("nombre", ""))
         palabras_prod = nombre_norm.split()
         
@@ -226,6 +257,7 @@ def buscar_productos(q: str, limit: int = 200):
         
         for palabra_q in palabras_query:
             mejor_score_palabra = 0
+            es_color = palabra_q in COLORES or (palabra_q in SINONIMOS_INVERSO and SINONIMOS_INVERSO[palabra_q] in COLORES)
             
             for palabra_p in palabras_prod:
                 score_palabra = 0
@@ -233,6 +265,12 @@ def buscar_productos(q: str, limit: int = 200):
                 # Coincidencia exacta
                 if palabra_q == palabra_p:
                     score_palabra = 1.0
+                # Color coincide con "varios"
+                elif es_color and palabra_p in {'varios', 'surtido', 'surtidos', 'multicolor'}:
+                    score_palabra = 0.95
+                # Sinónimos
+                elif son_sinonimos(palabra_q, palabra_p):
+                    score_palabra = 0.95
                 # Substring (tubo en tuberia, zinc en zincado)
                 elif palabra_q in palabra_p:
                     score_palabra = 0.85
@@ -252,8 +290,26 @@ def buscar_productos(q: str, limit: int = 200):
             # Score = coincidencias / total palabras buscadas
             score = coincidencias / len(palabras_query)
             
-            # Bonus si el nombre contiene todas las palabras importantes
-            if score > 0.5:
+            # Penalizar si no contiene el sujeto principal
+            if sujeto_principal:
+                sujeto_encontrado = False
+                for exp in expansiones_sujeto:
+                    if exp in palabras_prod:
+                        sujeto_encontrado = True
+                        break
+                    for pp in palabras_prod:
+                        if similitud_levenshtein(exp, pp) > 0.8:
+                            sujeto_encontrado = True
+                            break
+                    if sujeto_encontrado:
+                        break
+                
+                if not sujeto_encontrado:
+                    score *= 0.2  # Penalización masiva
+                else:
+                    score *= 1.2  # Bonificación
+            
+            if score > 0.3:
                 resultados.append({
                     "producto": prod,
                     "score": score
@@ -522,6 +578,12 @@ SINONIMOS = {
     'azl': ['azul', 'blue'],
     'vde': ['verde', 'green'],
     'ama': ['amarillo', 'yellow'],
+    # Colores metálicos
+    'dorado': ['oro', 'dorada', 'gold'],
+    'oro': ['dorado', 'dorada', 'gold'],
+    'plateado': ['plata', 'plateada', 'silver'],
+    'plata': ['plateado', 'plateada', 'silver'],
+    'bronce': ['cafe', 'café', 'bronze'],
 }
 
 # Crear diccionario inverso para búsqueda rápida
@@ -533,6 +595,9 @@ for palabra, sinonimos in SINONIMOS.items():
 
 # Sinónimos dinámicos aprendidos de las correcciones del usuario
 SINONIMOS_DINAMICOS = {}
+
+# Colores conocidos
+COLORES = {'blanco', 'negro', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'dorado', 'plateado', 'bronce', 'cafe', 'naranja', 'morado', 'rosa', 'transparente', 'oro', 'plata'}
 
 def normalizar_medidas(texto: str) -> str:
     """Normaliza medidas escritas y formatos alternativos a fracciones estándar"""
