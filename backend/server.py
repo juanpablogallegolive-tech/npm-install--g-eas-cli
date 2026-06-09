@@ -34,14 +34,6 @@ calculos_col = db["calculos"]
 cotizaciones_col = db["cotizaciones"]
 aprendizajes_col = db["aprendizajes"]  # Para aprendizaje de IA
 
-# Evento de inicio para cargar sinónimos dinámicos
-@app.on_event("startup")
-async def startup_event():
-    try:
-        extraer_sinonimos_dinamicos()
-    except Exception as e:
-        print(f"⚠️ No se pudieron cargar sinónimos dinámicos al inicio: {e}")
-
 # ==================== MODELS ====================
 
 class PyObjectId(ObjectId):
@@ -205,7 +197,15 @@ def buscar_productos(q: str, limit: int = 200):
         productos = list(productos_col.find({"nombre": regex}).limit(limit))
         return [serialize_doc(p) for p in productos]
     
-    # 1. Buscar si hay una corrección/aprendizaje previo para esta búsqueda
+    # Expandir sinónimos en la búsqueda
+    palabras_expandidas = []
+    for p in palabras_query:
+        palabras_expandidas.append(p)
+        # Agregar sinónimos conocidos
+        if p in SINONIMOS_INVERSO:
+            palabras_expandidas.append(SINONIMOS_INVERSO[p])
+    
+    # 1. Buscar si hay una corrección directa o alias para la query completa
     aprendizaje = buscar_aprendizaje(q)
     id_aprendido = None
     resultados = []
@@ -216,40 +216,32 @@ def buscar_productos(q: str, limit: int = 200):
                 id_aprendido = str(prod_aprendido["_id"])
                 resultados.append({
                     "producto": prod_aprendido,
-                    "score": 1.1  # Score especial para ponerlo de primero
+                    "score": 1.1  # Score especial superior al máximo para ponerlo de primero
                 })
         except Exception as e:
             print(f"Error cargando producto aprendido: {e}")
-    
-    # Expandir sinónimos en la búsqueda
-    palabras_expandidas = []
-    for p in palabras_query:
-        palabras_expandidas.append(p)
-        # Agregar sinónimos conocidos
-        if p in SINONIMOS_INVERSO:
-            palabras_expandidas.append(SINONIMOS_INVERSO[p])
+
+    # Obtener productos para búsqueda inteligente
+    productos = list(productos_col.find().limit(5000))
     
     # Determinar el "sujeto" principal de la búsqueda (el objeto central, e.g. "arandela", "tubo")
     # Es la primera palabra que no sea un número ni una unidad ni una MARCA
     sujeto_principal = None
     unidades = {'mm', 'cm', 'pul', 'pulg', 'pulgada', 'pulgadas', 'mt', 'mts', 'metro', 'metros', 'oz', 'pcs', 'ml', 'mili', 'mililitros'}
     marcas_conocidas = {'total', 'incolma', 'colbon', 'dewalt', 'makita', 'bosch', 'stanley', 'truper', 'pretul', 'pintuco', 'sapolin', 'corona', 'pavco', 'gerfor', 'sika', 'loctite', 'abro', 'bellota', 'herragro', 'socoda', 'yale', 'schlage', 'imsa', 'centelsa', 'argos', 'cemex', '3m', 'gato', 'afix', 'mp', 'performax', 'codelca', 'indu', 'induma', 'gavilan', 'vera', 'tools', 'uduke', 'johnny', 'johnnys'}
+    
     for p in palabras_query:
         if len(p) > 2 and not p.isdigit() and not re.match(r'^\d', p) and p not in unidades and p not in marcas_conocidas:
             sujeto_principal = p
             break
-    
+            
     expansiones_sujeto = []
     if sujeto_principal:
         expansiones_sujeto = expandir_sinonimos(sujeto_principal).split()
-    
-    # Obtener productos para búsqueda inteligente
-    productos = list(productos_col.find().limit(5000))
-    
+
     for prod in productos:
-        # Evitar duplicar el producto aprendido
         if id_aprendido and str(prod["_id"]) == id_aprendido:
-            continue
+            continue  # Evitar duplicar el producto aprendido
             
         nombre_norm = normalizar_texto(prod.get("nombre", ""))
         palabras_prod = nombre_norm.split()
@@ -259,6 +251,8 @@ def buscar_productos(q: str, limit: int = 200):
         
         for palabra_q in palabras_query:
             mejor_score_palabra = 0
+            
+            # Check for color matching 'varios'
             es_color = palabra_q in COLORES or (palabra_q in SINONIMOS_INVERSO and SINONIMOS_INVERSO[palabra_q] in COLORES)
             
             for palabra_p in palabras_prod:
@@ -267,7 +261,6 @@ def buscar_productos(q: str, limit: int = 200):
                 # Coincidencia exacta
                 if palabra_q == palabra_p:
                     score_palabra = 1.0
-                # Color coincide con "varios"
                 elif es_color and palabra_p in {'varios', 'surtido', 'surtidos', 'multicolor'}:
                     score_palabra = 0.95
                 # Sinónimos
@@ -292,14 +285,18 @@ def buscar_productos(q: str, limit: int = 200):
             # Score = coincidencias / total palabras buscadas
             score = coincidencias / len(palabras_query)
             
-            # Penalizar si no contiene el sujeto principal
+            # Penalizar si el producto no contiene el sujeto principal
             if sujeto_principal:
                 sujeto_encontrado = False
                 for exp in expansiones_sujeto:
                     if exp in palabras_prod:
                         sujeto_encontrado = True
                         break
+                    # Fuzzy match y Stemming
                     for pp in palabras_prod:
+                        if len(exp) >= 5 and len(pp) >= 5 and pp.startswith(exp[:4]):
+                            sujeto_encontrado = True
+                            break
                         if similitud_levenshtein(exp, pp) > 0.8:
                             sujeto_encontrado = True
                             break
@@ -307,11 +304,12 @@ def buscar_productos(q: str, limit: int = 200):
                         break
                 
                 if not sujeto_encontrado:
-                    score *= 0.2  # Penalización masiva
+                    score *= 0.2  # Penalización masiva, probablemente irrelevante
                 else:
-                    score *= 1.2  # Bonificación
+                    score *= 1.2  # Bonificación por tener el sustantivo
             
-            if score > 0.3:
+            # Bonus si el nombre contiene todas las palabras importantes
+            if score > 0.5:
                 resultados.append({
                     "producto": prod,
                     "score": score
@@ -557,6 +555,15 @@ SINONIMOS = {
     'tap': ['tapon', 'plug', 'cap'],
     'abr': ['abrazadera', 'clamp'],
     'torn': ['tornillo', 'screw', 'bolt'],
+    'taladro': ['perforadora', 'rotomartillo'],
+    'quemado': ['negro', 'amarre', 'recocido'],
+    'pega': ['pegante', 'pegamento', 'cola', 'adhesivo', 'silicona'],
+    'goma': ['pegante', 'pegamento', 'cola', 'adhesivo', 'silicona'],
+    'capacito': ['capacitor', 'condensador'],
+    'muro': ['concreto', 'cemento', 'pared'],
+    'tapizar': ['tapiceria'],
+    'corruga': ['corrugado', 'corrugada'],
+    'cor': ['corte'],
     'tuer': ['tuerca', 'nut'],
     'aran': ['arandela', 'washer'],
     'clav': ['clavo', 'nail'],
@@ -580,7 +587,6 @@ SINONIMOS = {
     'azl': ['azul', 'blue'],
     'vde': ['verde', 'green'],
     'ama': ['amarillo', 'yellow'],
-    # Colores metálicos
     'dorado': ['oro', 'dorada', 'gold'],
     'oro': ['dorado', 'dorada', 'gold'],
     'plateado': ['plata', 'plateada', 'silver'],
@@ -595,14 +601,9 @@ for palabra, sinonimos in SINONIMOS.items():
     for sin in sinonimos:
         SINONIMOS_INVERSO[sin.split()[0]] = palabra  # Solo primera palabra
 
-# Sinónimos dinámicos aprendidos de las correcciones del usuario
-SINONIMOS_DINAMICOS = {}
-
-# Colores conocidos
-COLORES = {'blanco', 'negro', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'dorado', 'plateado', 'bronce', 'cafe', 'naranja', 'morado', 'rosa', 'transparente', 'oro', 'plata'}
-
 def normalizar_medidas(texto: str) -> str:
     """Normaliza medidas escritas y formatos alternativos a fracciones estándar"""
+    import re
     # Convertir "1 4", "1-4", "1_4" a "1/4" etc para denominadores comunes
     texto = re.sub(r'\b(\d+)[\s\-_]+(2|3|4|8|16|32|64)\b', r'\1/\2', texto)
     
@@ -778,7 +779,7 @@ MARCAS = {
 # Palabras importantes (tipos de productos)
 PALABRAS_IMPORTANTES = {
     # Herramientas eléctricas
-    'pulidora', 'lijadora', 'sierra', 'taladro', 'caladora', 'ingletadora', 'rotomartillo', 'atornillador', 'esmeril',
+    'pulidora', 'lijadora', 'sierra', 'taladro', 'atornillador', 'esmeril',
     'amoladora', 'cortadora', 'fresadora', 'cepilladora', 'router', 'dremel', 'minipulidora',
     # Herramientas manuales  
     'martillo', 'destornillador', 'llave', 'alicate', 'pinza', 'tenaza', 'tijera', 'serrucho', 'escuadra', 'nivel', 'flexometro',
@@ -844,30 +845,38 @@ def normalizar_marca(palabra: str) -> str:
             return estandar
     return palabra
 
+# Sinónimos aprendidos dinámicamente a partir de las correcciones del usuario
+SINONIMOS_DINAMICOS = {}
+
 def extraer_sinonimos_dinamicos():
     """
     Analiza todos los aprendizajes/correcciones del usuario guardados en la base de datos
-    y extrae sinónimos a nivel de palabra utilizando alineación de prefijos y similitud fuzzy.
+    y extrae sinónimos a nivel de palabra utilizando alineación de prefijos, similitud fuzzy,
+    y aprendizaje estadístico de co-ocurrencias para múltiples términos no coincidentes.
     """
     global SINONIMOS_DINAMICOS, SINONIMOS_INVERSO
     mapa = {}
-    cooc_counts = {}
-    aw_counts = {}
+    cooc_counts = {}  # (aw, cw) -> count
+    aw_counts = {}    # aw -> count
     
     try:
+        # Cargar todos los aprendizajes guardados en MongoDB
         aprendizajes = list(aprendizajes_col.find({}))
         
         for apr in aprendizajes:
             corr_norm = normalizar_texto(apr.get("nombre_producto", ""))
             corr_words = [w for w in corr_norm.split() if len(w) > 1]
             
+            # Revisar cada alias ingresado por el usuario
             for alias in apr.get("aliases_normalizados", []):
                 alias_words = [w for w in alias.split() if len(w) > 1]
                 
+                # Ignorar conectores comunes
                 stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
                 corr_words_clean = [w for w in corr_words if w not in stopwords]
                 alias_words_clean = [w for w in alias_words if w not in stopwords]
                 
+                # Identificar palabras que coinciden exactamente o son casi idénticas (>0.85 Levenshtein)
                 unmatched_alias = []
                 unmatched_corr = list(corr_words_clean)
                 
@@ -881,6 +890,7 @@ def extraer_sinonimos_dinamicos():
                     if not match_found:
                         unmatched_alias.append(aw)
                 
+                # 1. Emparejamiento por prefijo (abreviaciones claras como "torn" -> "tornillo")
                 paired_alias = set()
                 paired_corr = set()
                 
@@ -890,7 +900,11 @@ def extraer_sinonimos_dinamicos():
                     for cw in unmatched_corr:
                         if cw in paired_corr:
                             continue
-                        is_prefix = (cw.startswith(aw) or aw.startswith(cw)) and len(min(aw, cw, key=len)) >= 3
+                        # Verificar si uno es prefijo del otro
+                        is_prefix = False
+                        if (cw.startswith(aw) or aw.startswith(cw)) and len(min(aw, cw)) >= 3:
+                            is_prefix = True
+                            
                         score = 0.9 if is_prefix else similitud_levenshtein(aw, cw)
                         if score > best_score and score >= 0.5:
                             best_score = score
@@ -899,15 +913,18 @@ def extraer_sinonimos_dinamicos():
                     if best_cw:
                         paired_alias.add(aw)
                         paired_corr.add(best_cw)
+                        # Registrar sinónimo directo en ambas direcciones
                         for w1, w2 in [(aw, best_cw), (best_cw, aw)]:
                             if w1 not in mapa:
                                 mapa[w1] = []
                             if w2 not in mapa[w1]:
                                 mapa[w1].append(w2)
                 
+                # Remover los emparejados por prefijo/similitud
                 remaining_alias = [w for w in unmatched_alias if w not in paired_alias]
                 remaining_corr = [w for w in unmatched_corr if w not in paired_corr]
                 
+                # 2. Si queda exactamente 1 palabra en cada lado, se emparejan directamente (ej: "dorado" -> "oro")
                 if len(remaining_alias) == 1 and len(remaining_corr) == 1:
                     w1, w2 = remaining_alias[0], remaining_corr[0]
                     for x, y in [(w1, w2), (w2, w1)]:
@@ -916,6 +933,7 @@ def extraer_sinonimos_dinamicos():
                         if y not in mapa[x]:
                             mapa[x].append(y)
                 
+                # 3. Si quedan múltiples, acumular co-ocurrencias para aprendizaje estadístico
                 elif len(remaining_alias) > 0 and len(remaining_corr) > 0:
                     for aw in remaining_alias:
                         aw_counts[aw] = aw_counts.get(aw, 0) + 1
@@ -923,9 +941,12 @@ def extraer_sinonimos_dinamicos():
                             pair = (aw, cw)
                             cooc_counts[pair] = cooc_counts.get(pair, 0) + 1
         
+        # 4. Procesar co-ocurrencias estadísticas
         for (aw, cw), count in cooc_counts.items():
+            # Umbral: co-ocurren al menos 2 veces
             if count >= 2:
                 prob = count / aw_counts[aw]
+                # Si representa al menos el 40% de las apariciones de aw, es un match confiable!
                 if prob >= 0.4:
                     for x, y in [(aw, cw), (cw, aw)]:
                         if x not in mapa:
@@ -935,30 +956,33 @@ def extraer_sinonimos_dinamicos():
                             
         SINONIMOS_DINAMICOS = mapa
         
+        # Reconstruir index inverso incorporando los estáticos + dinámicos
         SINONIMOS_INVERSO.clear()
         for palabra, sinonimos in SINONIMOS.items():
             SINONIMOS_INVERSO[palabra] = palabra
             for sin in sinonimos:
                 SINONIMOS_INVERSO[sin.split()[0]] = palabra
                 
+        # Incorporar dinámicos al índice inverso de búsqueda
         for canonical, alts in SINONIMOS_DINAMICOS.items():
             for alt in alts:
                 first_word = alt.split()[0]
                 if first_word not in SINONIMOS_INVERSO:
                     SINONIMOS_INVERSO[first_word] = canonical
                     
-        print(f"🧠 [IA] Se cargaron {len(mapa)} sinónimos dinámicos de {len(aprendizajes)} correcciones.")
+        print(f"🧠 [IA de Aprendizaje] Se cargaron {len(mapa)} relaciones de sinónimos dinámicos a partir de {len(aprendizajes)} correcciones.")
     except Exception as e:
         print(f"❌ Error extrayendo sinónimos dinámicos: {e}")
 
 def son_sinonimos(p1: str, p2: str) -> bool:
-    """Verifica si dos palabras son sinónimos (predefinidos o aprendidos)"""
+    """Verifica si dos palabras son sinónimos (ya sean predefinidos o aprendidos)"""
     p1_norm = normalizar_marca(p1)
     p2_norm = normalizar_marca(p2)
     
     if p1_norm == p2_norm:
         return True
         
+    # Equivalencia semántica: Colores específicos <-> "varios" / "surtido"
     COLORES = {'blanco', 'negro', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'dorado', 'plateado', 'bronce', 'cafe', 'naranja', 'morado', 'rosa', 'transparente'}
     VARIOS = {'varios', 'surtido', 'surtidos', 'multicolor'}
     
@@ -968,16 +992,19 @@ def son_sinonimos(p1: str, p2: str) -> bool:
     if (es_color1 and p2_norm in VARIOS) or (es_color2 and p1_norm in VARIOS):
         return True
 
+    # Caso 1: Sinónimos estáticos predefinidos
     if p1_norm in SINONIMOS and p2_norm in SINONIMOS[p1_norm]:
         return True
     if p2_norm in SINONIMOS and p1_norm in SINONIMOS[p2_norm]:
         return True
         
+    # Caso 2: Sinónimos dinámicos aprendidos del usuario
     if p1_norm in SINONIMOS_DINAMICOS and p2_norm in SINONIMOS_DINAMICOS[p1_norm]:
         return True
     if p2_norm in SINONIMOS_DINAMICOS and p1_norm in SINONIMOS_DINAMICOS[p2_norm]:
         return True
         
+    # Caso 3: Ambas palabras corresponden a la misma forma canónica
     canon1 = SINONIMOS_INVERSO.get(p1_norm)
     canon2 = SINONIMOS_INVERSO.get(p2_norm)
     if canon1 and canon2 and canon1 == canon2:
@@ -987,6 +1014,7 @@ def son_sinonimos(p1: str, p2: str) -> bool:
 
 def palabras_similares(p1: str, p2: str) -> float:
     """Compara dos palabras considerando variaciones de marca y sinónimos"""
+    # Normalizar ambas
     p1_norm = normalizar_marca(p1)
     p2_norm = normalizar_marca(p2)
     
@@ -995,7 +1023,7 @@ def palabras_similares(p1: str, p2: str) -> float:
     if p1 == p2:
         return 1.0
         
-    # Verificar sinónimos (estáticos y dinámicos)
+    # Verificar si son sinónimos registrados
     if son_sinonimos(p1, p2):
         return 0.95
         
@@ -1164,6 +1192,7 @@ def guardar_aprendizaje(request: AprendizajeRequest):
     # Buscar si ya existe aprendizaje para ESTE PRODUCTO
     existente_producto = aprendizajes_col.find_one({"producto_id": request.producto_id_correcto})
     
+    response_data = {}
     if existente_producto:
         # Agregar este nombre como nuevo alias si no existe
         aliases = existente_producto.get("aliases", [])
@@ -1185,43 +1214,46 @@ def guardar_aprendizaje(request: AprendizajeRequest):
                 "$inc": {"veces_corregido": 1}
             }
         )
-        return {
+        response_data = {
             "message": "Alias agregado al aprendizaje existente",
             "nombre": request.nombre_original,
             "total_aliases": len(aliases)
         }
-    
-    # Buscar si ya existe este nombre exacto
-    existente_nombre = aprendizajes_col.find_one({"nombre_normalizado": nombre_norm})
-    
-    if existente_nombre:
-        # Actualizar a nuevo producto
-        aprendizajes_col.update_one(
-            {"_id": existente_nombre["_id"]},
-            {
-                "$set": {
-                    "producto_id": request.producto_id_correcto,
-                    "nombre_producto": request.nombre_producto_correcto,
-                    "ultima_actualizacion": datetime.now()
-                },
-                "$inc": {"veces_corregido": 1}
-            }
-        )
     else:
-        # Crear nuevo aprendizaje
-        aprendizajes_col.insert_one({
-            "nombre_original": request.nombre_original,
-            "nombre_normalizado": nombre_norm,
-            "aliases": [request.nombre_original],
-            "aliases_normalizados": [nombre_norm],
-            "producto_id": request.producto_id_correcto,
-            "nombre_producto": request.nombre_producto_correcto,
-            "veces_corregido": 1,
-            "fecha_creacion": datetime.now(),
-            "ultima_actualizacion": datetime.now()
-        })
+        # Buscar si ya existe este nombre exacto
+        existente_nombre = aprendizajes_col.find_one({"nombre_normalizado": nombre_norm})
+        
+        if existente_nombre:
+            # Actualizar a nuevo producto
+            aprendizajes_col.update_one(
+                {"_id": existente_nombre["_id"]},
+                {
+                    "$set": {
+                        "producto_id": request.producto_id_correcto,
+                        "nombre_producto": request.nombre_producto_correcto,
+                        "ultima_actualizacion": datetime.now()
+                    },
+                    "$inc": {"veces_corregido": 1}
+                }
+            )
+        else:
+            # Crear nuevo aprendizaje
+            aprendizajes_col.insert_one({
+                "nombre_original": request.nombre_original,
+                "nombre_normalizado": nombre_norm,
+                "aliases": [request.nombre_original],
+                "aliases_normalizados": [nombre_norm],
+                "producto_id": request.producto_id_correcto,
+                "nombre_producto": request.nombre_producto_correcto,
+                "veces_corregido": 1,
+                "fecha_creacion": datetime.now(),
+                "ultima_actualizacion": datetime.now()
+            })
+        response_data = {"message": "Aprendizaje guardado", "nombre": request.nombre_original}
     
-    return {"message": "Aprendizaje guardado", "nombre": request.nombre_original}
+    # Extraer sinónimos dinámicos en caliente tras la actualización
+    extraer_sinonimos_dinamicos()
+    return response_data
 
 @app.get("/api/aprendizajes")
 def obtener_aprendizajes():
@@ -1249,28 +1281,6 @@ def match_productos(request: MatchRequest):
                 "sospechoso": True,
                 "aprendido": False
             } for nombre in request.nombres]
-            
-        # PRE-PROCESAR PRODUCTOS PARA EVITAR TIMEOUTS
-        productos_procesados = []
-        for prod in productos:
-            try:
-                prod_expandido = expandir_fracciones(prod.get("nombre", ""))
-                prod_norm = normalizar_texto(prod_expandido)
-                palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
-                
-                marca_producto = None
-                for p in palabras_prod:
-                    if p in MARCAS:
-                        marca_producto = p
-                        break
-                        
-                productos_procesados.append({
-                    "raw": prod,
-                    "palabras_prod": palabras_prod,
-                    "marca_producto": marca_producto
-                })
-            except Exception:
-                continue
         
         resultados = []
         for nombre_buscar in request.nombres:
@@ -1319,11 +1329,18 @@ def match_productos(request: MatchRequest):
                             if var not in palabras_busq_norm:
                                 palabras_busq_norm.append(var)
                 
-                for prod_data in productos_procesados:
+                for prod in productos:
                     try:
-                        prod = prod_data["raw"]
-                        palabras_prod = prod_data["palabras_prod"]
-                        marca_producto = prod_data["marca_producto"]
+                        prod_expandido = expandir_fracciones(prod.get("nombre", ""))
+                        prod_norm = normalizar_texto(prod_expandido)
+                        palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
+                        
+                        # DETECTAR MARCA EN EL PRODUCTO
+                        marca_producto = None
+                        for p in palabras_prod:
+                            if p in MARCAS:
+                                marca_producto = p
+                                break
                         
                         # SI HAY MARCA BUSCADA, VERIFICAR QUE COINCIDA
                         if marca_buscada:
@@ -1358,15 +1375,10 @@ def match_productos(request: MatchRequest):
                             
                             mejor_match_palabra = 0
                             for p_prod in palabras_prod:
-                                if p_busq == p_prod:
-                                    mejor_match_palabra = 1.0
+                                sim = palabras_similares(p_busq, p_prod)
+                                mejor_match_palabra = max(mejor_match_palabra, sim)
+                                if mejor_match_palabra >= 1.0:
                                     break
-                                elif p_busq in p_prod or p_prod in p_busq:
-                                    mejor_match_palabra = max(mejor_match_palabra, 0.85)
-                                elif len(p_busq) > 2 and len(p_prod) > 2:
-                                    sim = similitud_levenshtein(p_busq, p_prod)
-                                    if sim > 0.75:
-                                        mejor_match_palabra = max(mejor_match_palabra, sim)
                             
                             if es_critica and mejor_match_palabra > 0.7:
                                 palabras_criticas_encontradas += 1
@@ -1432,12 +1444,21 @@ def match_productos(request: MatchRequest):
             "aprendido": False
         } for nombre in request.nombres]
 
-# ==================== HEALTH CHECK ====================
-
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "database": DB_NAME}
 
+# Cargar sinónimos dinámicos al iniciar el servidor
+try:
+    extraer_sinonimos_dinamicos()
+except Exception as e:
+    print(f"⚠️ No se pudieron cargar sinónimos dinámicos en el arranque: {e}")
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    print(f"🚀 CalcuP Backend iniciando en http://{host}:{port}")
+    print(f"📦 Base de datos: {DB_NAME}")
+    print(f"🔗 MongoDB: {MONGO_URL[:30]}...")
+    uvicorn.run(app, host=host, port=port)
