@@ -229,11 +229,13 @@ def buscar_productos(q: str, limit: int = 200):
         if p in SINONIMOS_INVERSO:
             palabras_expandidas.append(SINONIMOS_INVERSO[p])
     
-    # Determinar el "sujeto" principal (el objeto central, ej: "arandela", "tubo")
+    # Determinar el "sujeto" principal de la búsqueda (el objeto central, e.g. "arandela", "tubo")
+    # Es la primera palabra que no sea un número ni una unidad ni una MARCA
     sujeto_principal = None
-    unidades = {'mm', 'cm', 'pul', 'pulg', 'pulgada', 'pulgadas'}
+    unidades = {'mm', 'cm', 'pul', 'pulg', 'pulgada', 'pulgadas', 'mt', 'mts', 'metro', 'metros', 'oz', 'pcs', 'ml', 'mili', 'mililitros'}
+    marcas_conocidas = {'total', 'incolma', 'colbon', 'dewalt', 'makita', 'bosch', 'stanley', 'truper', 'pretul', 'pintuco', 'sapolin', 'corona', 'pavco', 'gerfor', 'sika', 'loctite', 'abro', 'bellota', 'herragro', 'socoda', 'yale', 'schlage', 'imsa', 'centelsa', 'argos', 'cemex', '3m', 'gato', 'afix', 'mp', 'performax', 'codelca', 'indu', 'induma', 'gavilan', 'vera', 'tools', 'uduke', 'johnny', 'johnnys'}
     for p in palabras_query:
-        if len(p) > 2 and not p.isdigit() and not re.match(r'^\d', p) and p not in unidades:
+        if len(p) > 2 and not p.isdigit() and not re.match(r'^\d', p) and p not in unidades and p not in marcas_conocidas:
             sujeto_principal = p
             break
     
