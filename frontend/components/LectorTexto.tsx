@@ -178,9 +178,11 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
       return;
     }
     
-    // Separar por líneas y limpiar
+    // Separar por líneas y limpiar prefijos comunes (viñetas, números de lista)
     const lineas = textoCapturado
       .split('\n')
+      .map(l => l.replace(/^[\s\-\*\•\>]+/, '')) // Quitar viñetas como "-", "*", "•", ">"
+      .map(l => l.replace(/^[0-9]+[\.\)\-]\s+/, '')) // Quitar listas numeradas como "1. ", "2) ", "3 - "
       .map(l => l.trim())
       .filter(l => l.length > 2); // Ignorar líneas muy cortas
     

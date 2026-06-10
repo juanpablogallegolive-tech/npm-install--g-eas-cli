@@ -237,6 +237,10 @@ function removeAccents(str: string): string {
  */
 function normalizarMedidas(texto: string): string {
   let res = texto;
+  
+  // Rescatar símbolo de pulgada antes de que se limpie por regex
+  res = res.replace(/"/g, ' pulgada ');
+
   // Convertir "1 4", "1-4", "1_4" a "1/4" etc para denominadores comunes
   res = res.replace(/\b(\d+)[\s\-_]+(2|3|4|8|16|32|64)\b/g, '$1/$2');
   
@@ -547,9 +551,16 @@ class SmartSearchEngine {
     
     // Paso 3: Deep Semantic Scanner (IA de Contención Profunda)
     // Escaneamos TODO el catálogo evadiendo los límites de Fuse.js para queries de múltiples palabras.
-    const palabrasQuery = queryNorm.split(' ').filter(p => p.length > 1);
+    const palabrasQuery = queryNorm.split(' ').filter(p => p.length > 1 || /^\d+$/.test(p));
+    
     if (palabrasQuery.length > 1) {
-      for (const prod of this.productos) {
+      for (let i = 0; i < this.productos.length; i++) {
+        // Evitar bloqueo del UI thread en React Native
+        if (i > 0 && i % 500 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        
+        const prod = this.productos[i];
         const nombreNormProd = prod.nombreNormalizado;
         const nombreExpProd = prod.nombreExpandido || nombreNormProd;
         const partesProd = nombreExpProd.split(' ');
@@ -600,13 +611,17 @@ class SmartSearchEngine {
           const ratio = coincidencias / palabrasQuery.length;
           const existing = resultadosMap.get(prod._id);
           
+          // TIEBREAKER: Priorizar nombres de producto más cortos que contengan la búsqueda
+          const tiebreaker = (coincidencias / Math.max(coincidencias, partesProd.length)) * 0.01;
+          
           if (coincidenciaExacta) {
              // BONIFICACIÓN SUPREMA: Todas las palabras coinciden
-             if (existing) existing.score = Math.min(existing.score, 0.05);
-             else resultadosMap.set(prod._id, { producto: prod, score: 0.05 });
+             const baseScore = 0.05 - tiebreaker;
+             if (existing) existing.score = Math.min(existing.score, baseScore);
+             else resultadosMap.set(prod._id, { producto: prod, score: baseScore });
           } else if (ratio >= 0.6) {
              // Mayoría de palabras coinciden (ej. 2 de 3, 3 de 4)
-             const fallbackScore = 0.2;
+             const fallbackScore = 0.2 - tiebreaker;
              if (existing) existing.score = Math.min(existing.score, fallbackScore);
              else resultadosMap.set(prod._id, { producto: prod, score: fallbackScore });
           }
@@ -620,7 +635,7 @@ class SmartSearchEngine {
     const marcasConocidas = new Set(['total', 'incolma', 'colbon', 'dewalt', 'makita', 'bosch', 'stanley', 'truper', 'pretul', 'pintuco', 'sapolin', 'corona', 'pavco', 'gerfor', 'sika', 'loctite', 'abro', 'bellota', 'herragro', 'socoda', 'yale', 'schlage', 'imsa', 'centelsa', 'argos', 'cemex', '3m', 'gato', 'afix', 'mp', 'performax', 'codelca', 'indu', 'induma', 'gavilan', 'vera', 'tools', 'uduke', 'johnny', 'johnnys']);
     
     const palabrasSujeto = queryNorm.split(' ').filter(p => 
-      p.length > 2 && 
+      (p.length > 2 || /^\d+$/.test(p)) && 
       !stopwords.has(p) && 
       !marcasConocidas.has(p) &&
       !/^\d/.test(p)
@@ -635,7 +650,7 @@ class SmartSearchEngine {
     const resultadosArray = Array.from(resultadosMap.values());
     
     for (const r of resultadosArray) {
-      if (sujetoPrincipal && r.score > 0) { // Excluir score 0 que son los aprendidos explícitos
+      if (sujetoPrincipal && r.score > 0 && r.score >= 0.1) { // Excluir score < 0.1 (aprendidos y exactos de Deep Scanner)
         const nombreExp = r.producto.nombreExpandido;
         const palabrasProd = nombreExp.split(' ');
         
