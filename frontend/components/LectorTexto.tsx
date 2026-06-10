@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   TextInput as RNTextInput,
   Modal,
-  Image,
   FlatList,
 } from 'react-native';
 import {
@@ -20,10 +19,10 @@ import {
   TextInput,
   Searchbar,
 } from 'react-native-paper';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import * as ImagePicker from 'expo-image-picker';
-import { matchProductos, productosApi, guardarAprendizaje } from '../services/api';
+import { matchProductos, guardarAprendizaje } from '../services/api';
+import { smartSearch } from '../services/smartSearch';
 import { Producto } from '../types/types';
+import { useDebouncedCallback } from '../hooks/useDebounce';
 
 interface ProductoMatch {
   nombre_original: string;
@@ -44,63 +43,56 @@ interface Props {
 
 export default function LectorTexto({ onProductosSeleccionados, onClose, visible }: Props) {
   const [step, setStep] = useState<'input' | 'edit' | 'match' | 'result'>('input');
-  const [inputMethod, setInputMethod] = useState<'text' | 'camera' | 'gallery' | null>(null);
   const [textoCapturado, setTextoCapturado] = useState('');
   const [lineasTexto, setLineasTexto] = useState<string[]>([]);
   const [matches, setMatches] = useState<ProductoMatch[]>([]);
   const [loading, setLoading] = useState(false);
-  const [cameraVisible, setCameraVisible] = useState(false);
   
   // Para cambiar producto
   const [editandoIndex, setEditandoIndex] = useState<number | null>(null);
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [resultadosBusqueda, setResultadosBusqueda] = useState<Producto[]>([]);
-  
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef<any>(null);
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const resetear = () => {
     setStep('input');
-    setInputMethod(null);
     setTextoCapturado('');
     setLineasTexto([]);
     setMatches([]);
     setEditandoIndex(null);
     setBusquedaProducto('');
     setResultadosBusqueda([]);
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
   };
 
-  // Buscar productos para cambiar (con debounce)
-  const buscarProductoParaCambiar = async (query: string) => {
-    setBusquedaProducto(query);
-    
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    
+  // Búsqueda interna debounced usando smartSearch (local, rápida, con aprendizajes)
+  const ejecutarBusqueda = useDebouncedCallback(async (query: string) => {
     if (query.length >= 1) {
-      searchTimeoutRef.current = setTimeout(async () => {
-        try {
-          const response = await productosApi.search(query);
-          setResultadosBusqueda(response.data.slice(0, 20));
-        } catch (error) {
-          console.error('Error buscando:', error);
-        }
-      }, 400);
+      try {
+        const resultados = await smartSearch.buscar(query, 20);
+        setResultadosBusqueda(resultados);
+      } catch (error) {
+        console.error('Error buscando:', error);
+      }
     } else {
       setResultadosBusqueda([]);
     }
+  }, 250);
+
+  // Buscar productos para cambiar (con debounce + smartSearch)
+  const buscarProductoParaCambiar = (query: string) => {
+    setBusquedaProducto(query);
+    ejecutarBusqueda(query);
   };
 
   // Cambiar producto manualmente y guardar aprendizaje
   const cambiarProducto = async (index: number, nuevoProducto: Producto) => {
     const match = matches[index];
     
-    // Guardar aprendizaje en el backend
+    // Registrar aprendizaje local inmediatamente (para búsquedas subsiguientes)
+    smartSearch.registrarAprendizajeLocal(
+      match.nombre_original, nuevoProducto._id, nuevoProducto.nombre
+    );
+    
+    // Guardar aprendizaje en el backend (persistencia)
     try {
       await guardarAprendizaje({
         nombre_original: match.nombre_original,
@@ -128,9 +120,6 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     setEditandoIndex(null);
     setBusquedaProducto('');
     setResultadosBusqueda([]);
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
     
     Alert.alert('✓ Aprendizaje guardado', `La IA recordará que "${match.nombre_original}" = "${nuevoProducto.nombre}"`);
   };
@@ -140,7 +129,12 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     const match = matches[index];
     if (!match.producto_sugerido) return;
     
-    // Guardar aprendizaje para reforzar
+    // Registrar aprendizaje local inmediatamente
+    smartSearch.registrarAprendizajeLocal(
+      match.nombre_original, match.producto_sugerido._id, match.producto_sugerido.nombre
+    );
+    
+    // Guardar aprendizaje en backend para reforzar
     try {
       await guardarAprendizaje({
         nombre_original: match.nombre_original,
@@ -272,53 +266,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
     onClose();
   };
 
-  // Tomar foto con cámara
-  const tomarFoto = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert('Permiso necesario', 'Necesitas dar permiso a la cámara');
-        return;
-      }
-    }
-    setCameraVisible(true);
-  };
 
-  // Capturar imagen de cámara
-  const capturarImagen = async () => {
-    if (cameraRef.current) {
-      try {
-        const photo = await cameraRef.current.takePictureAsync({ base64: true });
-        setCameraVisible(false);
-        
-        // Aquí iría OCR real - por ahora pedimos texto manual
-        Alert.alert(
-          'Foto capturada',
-          'La foto fue tomada. Por ahora, copia el texto de la imagen manualmente.',
-          [{ text: 'OK', onPress: () => setInputMethod('text') }]
-        );
-      } catch (error) {
-        Alert.alert('Error', 'No se pudo tomar la foto');
-      }
-    }
-  };
-
-  // Seleccionar de galería
-  const seleccionarGaleria = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      // Aquí iría OCR real - por ahora pedimos texto manual
-      Alert.alert(
-        'Imagen seleccionada',
-        'La imagen fue seleccionada. Por ahora, copia el texto de la imagen manualmente.',
-        [{ text: 'OK', onPress: () => setInputMethod('text') }]
-      );
-    }
-  };
 
   if (!visible) return null;
 
@@ -332,41 +280,8 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
         </View>
 
         <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-          {/* PASO 1: Seleccionar método de entrada */}
-          {step === 'input' && !inputMethod && (
-            <Card style={styles.card}>
-              <Card.Content>
-                <Text style={styles.stepTitle}>¿Cómo quieres ingresar los productos?</Text>
-                
-                <TouchableOpacity style={styles.methodButton} onPress={() => setInputMethod('text')}>
-                  <IconButton icon="pencil" size={32} iconColor="#6200ee" />
-                  <View style={styles.methodInfo}>
-                    <Text style={styles.methodTitle}>Escribir / Pegar texto</Text>
-                    <Text style={styles.methodDesc}>Copia y pega la lista de productos</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.methodButton} onPress={tomarFoto}>
-                  <IconButton icon="camera" size={32} iconColor="#6200ee" />
-                  <View style={styles.methodInfo}>
-                    <Text style={styles.methodTitle}>Cámara</Text>
-                    <Text style={styles.methodDesc}>Toma una foto del texto</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.methodButton} onPress={seleccionarGaleria}>
-                  <IconButton icon="image" size={32} iconColor="#6200ee" />
-                  <View style={styles.methodInfo}>
-                    <Text style={styles.methodTitle}>Galería</Text>
-                    <Text style={styles.methodDesc}>Selecciona una imagen existente</Text>
-                  </View>
-                </TouchableOpacity>
-              </Card.Content>
-            </Card>
-          )}
-
           {/* Entrada de texto */}
-          {step === 'input' && inputMethod === 'text' && (
+          {step === 'input' && (
             <Card style={styles.card}>
               <Card.Content>
                 <Text style={styles.stepTitle}>Ingresa los nombres de productos</Text>
@@ -383,7 +298,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
                 />
 
                 <View style={styles.buttonRow}>
-                  <Button mode="outlined" onPress={() => setInputMethod(null)}>Atrás</Button>
+                  <Button mode="outlined" onPress={onClose}>Cancelar</Button>
                   <Button mode="contained" onPress={procesarTexto}>Siguiente</Button>
                 </View>
               </Card.Content>
@@ -602,25 +517,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
           )}
         </ScrollView>
 
-        {/* Modal de cámara */}
-        <Modal visible={cameraVisible} animationType="slide">
-          <View style={styles.cameraContainer}>
-            <CameraView 
-              style={styles.camera} 
-              facing="back"
-              ref={cameraRef}
-            >
-              <View style={styles.cameraControls}>
-                <Button mode="contained" onPress={() => setCameraVisible(false)} buttonColor="#d32f2f">
-                  Cancelar
-                </Button>
-                <Button mode="contained" onPress={capturarImagen}>
-                  Capturar
-                </Button>
-              </View>
-            </CameraView>
-          </View>
-        </Modal>
+
       </View>
     </Modal>
   );
