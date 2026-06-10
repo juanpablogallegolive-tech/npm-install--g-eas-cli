@@ -19,6 +19,7 @@ export default function TabLayout() {
     <PaperProvider>
       <Tabs
         screenOptions={{
+          lazy: true, // ⚡ Perf: cargar cada tab solo cuando se visita por primera vez
           tabBarActiveTintColor: '#6200ee',
           tabBarInactiveTintColor: '#666',
           tabBarStyle: {

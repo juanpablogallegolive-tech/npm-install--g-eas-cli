@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -22,7 +22,9 @@ import {
   ActivityIndicator,
   ProgressBar,
 } from 'react-native-paper';
+// ✅ IMPORTS CORREGIDOS
 import { cotizacionesApi, productosApi } from '../services/api';
+import { busquedaInteligente, inicializarIndice, smartSearch } from '../services/smartSearch';
 import { Cotizacion, ItemCotizacion, Producto } from '../types/types';
 import { format } from 'date-fns';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -30,8 +32,10 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
 import LectorTexto from '../components/LectorTexto';
+import { useDebouncedCallback } from '../hooks/useDebounce';
 
 export default function QuotesScreen() {
+  // Estados básicos
   const [nombreCliente, setNombreCliente] = useState('');
   const [items, setItems] = useState<Array<{
     cantidad: string;
@@ -42,32 +46,86 @@ export default function QuotesScreen() {
   const [loading, setLoading] = useState(false);
   const [editingCotizacionId, setEditingCotizacionId] = useState<string | null>(null);
   const [lectorVisible, setLectorVisible] = useState(false);
-  
-  // Búsqueda de productos
+
+  // ✅ Estados de búsqueda
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Producto[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [searchingIndex, setSearchingIndex] = useState<number | null>(null);
   
-  // Cotizaciones guardadas
+  // Estados de cotizaciones
   const [cotizaciones, setCotizaciones] = useState<Cotizacion[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalExportVisible, setModalExportVisible] = useState(false);
   
-  // Export/Import
+  // Estados de Export/Import
   const [exportLoading, setExportLoading] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState('');
-  
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ✅ USEEFFECTS ORGANIZADOS
+  
+  // Cargar productos para índice de búsqueda al inicio
+  useEffect(() => {
+    cargarProductosParaIndice();
+  }, []);
+
+  // Cargar cotizaciones guardadas
   useEffect(() => {
     loadCotizaciones();
   }, []);
 
+  // Recalcular total cuando cambien los items
   useEffect(() => {
     calcularTotal();
   }, [items]);
+
+  // ✅ FUNCIONES DE BÚSQUEDA CORREGIDAS
+
+  // Inicializar el índice de Fuse.js de forma eficiente usando caché local
+  const cargarProductosParaIndice = async () => {
+    try {
+      await inicializarIndice(false); // ✅ Usar caché si ya está inicializado
+      console.log(`✅ Buscador inteligente de productos inicializado`);
+    } catch (error) {
+      console.error('Error al inicializar el índice:', error);
+    }
+  };
+
+  // ⚡ Perf: búsqueda debounced para no ejecutar Fuse.js en cada tecla
+  const debouncedBuscar = useDebouncedCallback(async (query: string) => {
+    if (query.length >= 2) {
+      try {
+        const resultados = await busquedaInteligente(query, 20);
+        setSearchResults(resultados);
+        setShowResults(resultados.length > 0);
+        console.log(`🔍 Búsqueda: "${query}" → ${resultados.length} resultados`);
+      } catch (error) {
+        console.error('Error en búsqueda inteligente:', error);
+        try {
+          const response = await productosApi.search(query);
+          setSearchResults(response.data);
+          setShowResults(response.data.length > 0);
+        } catch (fallbackError) {
+          console.error('Error en fallback:', fallbackError);
+          setSearchResults([]);
+          setShowResults(false);
+        }
+      }
+    } else {
+      setSearchResults([]);
+      setShowResults(false);
+    }
+  }, 250);
+
+  // 🔥 BÚSQUEDA INTELIGENTE CON FUSE.JS (debounced)
+  const buscarProducto = useCallback((index: number, query: string) => {
+    setSearchQuery(query);
+    setSearchingIndex(index);
+    debouncedBuscar(query);
+  }, [debouncedBuscar]);
+
+  // ✅ RESTO DE FUNCIONES (sin cambios)
 
   const loadCotizaciones = async () => {
     try {
@@ -88,37 +146,12 @@ export default function QuotesScreen() {
 
   const actualizarCantidad = (index: number, cantidad: string) => {
     const newItems = [...items];
-    // Permitir decimales: reemplazar coma por punto
     const cantidadNormalizada = cantidad.replace(',', '.');
     newItems[index].cantidad = cantidad;
     const cant = parseFloat(cantidadNormalizada) || 0;
     const precio = newItems[index].producto?.costo_base || 0;
     newItems[index].subtotal = cant * precio;
     setItems(newItems);
-  };
-
-  const buscarProducto = async (index: number, query: string) => {
-    setSearchingIndex(index);
-    setSearchQuery(query);
-    
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    
-    if (query.length >= 1) {
-      searchTimeoutRef.current = setTimeout(async () => {
-        try {
-          const response = await productosApi.search(query);
-          setSearchResults(response.data);
-          setShowResults(true);
-        } catch (error) {
-          console.error('Error en búsqueda:', error);
-        }
-      }, 400);
-    } else {
-      setSearchResults([]);
-      setShowResults(false);
-    }
   };
 
   const seleccionarProducto = (index: number, producto: Producto) => {
@@ -130,9 +163,6 @@ export default function QuotesScreen() {
     setShowResults(false);
     setSearchQuery('');
     setSearchingIndex(null);
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
     Keyboard.dismiss();
   };
 
@@ -148,7 +178,6 @@ export default function QuotesScreen() {
     setEditingCotizacionId(null);
   };
 
-  // Manejar productos del lector
   const handleProductosLector = (productosLector: Array<{ producto: Producto; cantidad: number }>) => {
     const nuevosItems = productosLector.map(p => ({
       cantidad: p.cantidad.toString(),
@@ -157,6 +186,9 @@ export default function QuotesScreen() {
     }));
     setItems([...items, ...nuevosItems]);
   };
+
+  // ... resto de las funciones (guardarCotizacion, cargarCotizacion, etc.)
+  // El resto del código sigue igual
 
   const guardarCotizacion = async () => {
     if (items.length === 0) {
@@ -514,58 +546,73 @@ export default function QuotesScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView} keyboardShouldPersistTaps="handled">
-        {/* Header con estado de edición */}
-        {editingCotizacionId && (
-          <Card style={[styles.card, styles.editingCard]}>
-            <Card.Content>
-              <View style={styles.editingHeader}>
-                <Text style={styles.editingText}>Editando cotización</Text>
-                <Button mode="text" onPress={limpiar} textColor="#d32f2f">Cancelar</Button>
-              </View>
-            </Card.Content>
-          </Card>
+      <FlatList
+        data={items}
+        extraData={[searchingIndex, searchQuery, searchResults, showResults, total, editingCotizacionId, loading]}
+        keyExtractor={(_, index) => index.toString()}
+        keyboardShouldPersistTaps="handled"
+        style={styles.scrollView}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        ListHeaderComponent={() => (
+          <View>
+            {/* Header con estado de edición */}
+            {editingCotizacionId && (
+              <Card style={[styles.card, styles.editingCard]}>
+                <Card.Content>
+                  <View style={styles.editingHeader}>
+                    <Text style={styles.editingText}>Editando cotización</Text>
+                    <Button mode="text" onPress={limpiar} textColor="#d32f2f">Cancelar</Button>
+                  </View>
+                </Card.Content>
+              </Card>
+            )}
+
+            {/* Nombre del Cliente */}
+            <Card style={styles.card}>
+              <Card.Content>
+                <Text style={styles.sectionTitle}>Cliente</Text>
+                <TextInput
+                  mode="outlined"
+                  label="Nombre del cliente (opcional)"
+                  value={nombreCliente}
+                  onChangeText={setNombreCliente}
+                  style={styles.input}
+                />
+              </Card.Content>
+            </Card>
+
+            {/* Items Header */}
+            <Card style={[styles.card, { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginBottom: 0 }]}>
+              <Card.Content>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Productos</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <IconButton icon="plus" size={24} onPress={agregarFila} mode="contained" />
+                  </View>
+                </View>
+
+                {/* Botón grande para escanear/pegar lista */}
+                <TouchableOpacity 
+                  style={styles.lectorButton} 
+                  onPress={() => setLectorVisible(true)}
+                >
+                  <IconButton icon="text-recognition" size={28} iconColor="#fff" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.lectorButtonText}>Escanear / Pegar Lista</Text>
+                    <Text style={styles.lectorButtonDesc}>Agrega varios productos a la vez</Text>
+                  </View>
+                  <IconButton icon="chevron-right" size={24} iconColor="#fff" />
+                </TouchableOpacity>
+              </Card.Content>
+            </Card>
+          </View>
         )}
-
-        {/* Nombre del Cliente */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <Text style={styles.sectionTitle}>Cliente</Text>
-            <TextInput
-              mode="outlined"
-              label="Nombre del cliente (opcional)"
-              value={nombreCliente}
-              onChangeText={setNombreCliente}
-              style={styles.input}
-            />
-          </Card.Content>
-        </Card>
-
-        {/* Items */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Productos</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <IconButton icon="plus" size={24} onPress={agregarFila} mode="contained" />
-              </View>
-            </View>
-
-            {/* Botón grande para escanear/pegar lista */}
-            <TouchableOpacity 
-              style={styles.lectorButton} 
-              onPress={() => setLectorVisible(true)}
-            >
-              <IconButton icon="text-recognition" size={28} iconColor="#fff" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.lectorButtonText}>Escanear / Pegar Lista</Text>
-                <Text style={styles.lectorButtonDesc}>Agrega varios productos a la vez</Text>
-              </View>
-              <IconButton icon="chevron-right" size={24} iconColor="#fff" />
-            </TouchableOpacity>
-
-            {items.map((item, index) => (
-              <View key={index} style={styles.itemCard}>
+        renderItem={({ item, index }) => (
+          <View style={[styles.card, { marginVertical: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, elevation: 2 }]}>
+            <View style={{ paddingHorizontal: 16 }}>
+              <View style={styles.itemCard}>
                 <View style={styles.itemHeader}>
                   <Text style={styles.itemTitle}>Item {index + 1}</Text>
                   <IconButton icon="delete" size={20} iconColor="#d32f2f" onPress={() => eliminarFila(index)} />
@@ -612,55 +659,62 @@ export default function QuotesScreen() {
                   </View>
                 )}
               </View>
-            ))}
-
-            {items.length === 0 && (
-              <Text style={styles.emptyText}>Presiona + para agregar productos</Text>
-            )}
-
-            {items.length > 0 && (
-              <Button mode="outlined" onPress={agregarFila} icon="plus" style={{ marginTop: 8 }}>
-                Agregar otro producto
-              </Button>
-            )}
-          </Card.Content>
-        </Card>
-
-        {/* Total */}
-        {total > 0 && (
-          <Card style={styles.card}>
-            <Card.Content>
-              <View style={styles.totalBox}>
-                <Text style={styles.totalLabel}>TOTAL:</Text>
-                <Text style={styles.totalValor}>${total.toLocaleString()}</Text>
-              </View>
-            </Card.Content>
-          </Card>
+            </View>
+          </View>
         )}
+        ListFooterComponent={() => (
+          <View>
+            <Card style={[styles.card, { borderTopLeftRadius: 0, borderTopRightRadius: 0, marginTop: 0 }]}>
+              <Card.Content>
+                {items.length === 0 && (
+                  <Text style={styles.emptyText}>Presiona + para agregar productos</Text>
+                )}
 
-        {/* Botones */}
-        <View style={styles.buttonContainer}>
-          <Button mode="contained" onPress={guardarCotizacion} loading={loading} disabled={items.length === 0} icon="content-save">
-            {editingCotizacionId ? 'Actualizar Cotización' : 'Guardar Cotización'}
-          </Button>
-          
-          <Button mode="outlined" onPress={limpiar} icon="eraser">
-            Limpiar
-          </Button>
-          
-          <Divider style={styles.divider} />
-          
-          <Button mode="contained" onPress={() => setModalVisible(true)} icon="folder-open" buttonColor="#1976d2">
-            Ver Cotizaciones Guardadas
-          </Button>
-          
-          <Button mode="outlined" onPress={() => setModalExportVisible(true)} icon="swap-horizontal">
-            Importar / Exportar
-          </Button>
-        </View>
+                {items.length > 0 && (
+                  <Button mode="outlined" onPress={agregarFila} icon="plus" style={{ marginTop: 8 }}>
+                    Agregar otro producto
+                  </Button>
+                )}
+              </Card.Content>
+            </Card>
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
+            {/* Total */}
+            {total > 0 && (
+              <Card style={styles.card}>
+                <Card.Content>
+                  <View style={styles.totalBox}>
+                    <Text style={styles.totalLabel}>TOTAL:</Text>
+                    <Text style={styles.totalValor}>${total.toLocaleString()}</Text>
+                  </View>
+                </Card.Content>
+              </Card>
+            )}
+
+            {/* Botones */}
+            <View style={styles.buttonContainer}>
+              <Button mode="contained" onPress={guardarCotizacion} loading={loading} disabled={items.length === 0} icon="content-save">
+                {editingCotizacionId ? 'Actualizar Cotización' : 'Guardar Cotización'}
+              </Button>
+              
+              <Button mode="outlined" onPress={limpiar} icon="eraser">
+                Limpiar
+              </Button>
+              
+              <Divider style={styles.divider} />
+              
+              <Button mode="contained" onPress={() => setModalVisible(true)} icon="folder-open" buttonColor="#1976d2">
+                Ver Cotizaciones Guardadas
+              </Button>
+              
+              <Button mode="outlined" onPress={() => setModalExportVisible(true)} icon="swap-horizontal">
+                Importar / Exportar
+              </Button>
+            </View>
+
+            <View style={{ height: 40 }} />
+          </View>
+        )}
+      />
 
       {/* Modal de Cotizaciones */}
       <Portal>
@@ -746,11 +800,13 @@ export default function QuotesScreen() {
       </Portal>
 
       {/* Lector de Texto */}
-      <LectorTexto
-        visible={lectorVisible}
-        onClose={() => setLectorVisible(false)}
-        onProductosSeleccionados={handleProductosLector}
-      />
+      {lectorVisible && (
+        <LectorTexto
+          visible={lectorVisible}
+          onClose={() => setLectorVisible(false)}
+          onProductosSeleccionados={handleProductosLector}
+        />
+      )}
     </View>
   );
 }

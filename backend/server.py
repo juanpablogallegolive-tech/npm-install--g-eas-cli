@@ -187,9 +187,9 @@ def buscar_productos(q: str, limit: int = 200):
     query_norm = normalizar_texto(q)
     palabras_query = query_norm.split()
     
-    # Quitar palabras muy cortas y stopwords
+    # Quitar palabras muy cortas y stopwords, pero mantener números
     stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
-    palabras_query = [p for p in palabras_query if len(p) > 1 and p not in stopwords]
+    palabras_query = [p for p in palabras_query if (len(p) > 1 or p.isdigit()) and p not in stopwords]
     
     if not palabras_query:
         # Si no hay palabras válidas, usar regex simple
@@ -310,6 +310,10 @@ def buscar_productos(q: str, limit: int = 200):
             
             # Bonus si el nombre contiene todas las palabras importantes
             if score > 0.5:
+                # TIEBREAKER: Si tienen el mismo score, el nombre más corto debe ganar
+                # Penalizamos ligeramente los nombres más largos (cada palabra extra quita 0.01)
+                score -= len(palabras_prod) * 0.005
+                
                 resultados.append({
                     "producto": prod,
                     "score": score
@@ -564,6 +568,10 @@ SINONIMOS = {
     'tapizar': ['tapiceria'],
     'corruga': ['corrugado', 'corrugada'],
     'cor': ['corte'],
+    'incol': ['incolma'],
+    'incolma': ['incol'],
+    'premium': ['premiun'],
+    'premiun': ['premium'],
     'tuer': ['tuerca', 'nut'],
     'aran': ['arandela', 'washer'],
     'clav': ['clavo', 'nail'],
@@ -603,8 +611,11 @@ for palabra, sinonimos in SINONIMOS.items():
 
 def normalizar_medidas(texto: str) -> str:
     """Normaliza medidas escritas y formatos alternativos a fracciones estándar"""
-    import re
-    # Convertir "1 4", "1-4", "1_4" a "1/4" etc para denominadores comunes
+    # Rescatar símbolo de pulgada antes de que se limpie por regex
+    texto = texto.replace('"', ' pulgada ')
+    texto = texto.replace("''", ' pulgada ')
+    
+    # Fracciones separadas por espacio o guion (ej. 1 4 -> 1/4)
     texto = re.sub(r'\b(\d+)[\s\-_]+(2|3|4|8|16|32|64)\b', r'\1/\2', texto)
     
     # "1 y 1/2" -> "1 1/2"
@@ -1305,7 +1316,7 @@ def match_productos(request: MatchRequest):
                 # Expandir fracciones y normalizar búsqueda
                 busq_expandido = expandir_fracciones(nombre_buscar)
                 busq_norm = normalizar_texto(busq_expandido)
-                palabras_busq = [p for p in busq_norm.split() if len(p) > 1]
+                palabras_busq = [p for p in busq_norm.split() if len(p) > 1 or p.isdigit()]
                 
                 # Quitar stopwords
                 stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   ScrollView,
@@ -24,9 +24,13 @@ import {
 import { productosApi, calcularPrecio, calculosApi } from '../services/api';
 import { Producto, Flujo, Cliente, Calculo } from '../types/types';
 import { useStore } from '../store/store';
+import { useDebouncedCallback } from '../hooks/useDebounce';
 
 export default function CalculatorScreen() {
-  const { flujos, fetchFlujos, flujosVersion } = useStore();
+  // ⚡ Perf: selectores específicos para evitar re-renders innecesarios
+  const flujos = useStore((s) => s.flujos);
+  const fetchFlujos = useStore((s) => s.fetchFlujos);
+  const flujosVersion = useStore((s) => s.flujosVersion);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Producto[]>([]);
@@ -114,8 +118,8 @@ export default function CalculatorScreen() {
     setClientes(prev => prev.map(c => ({ ...c, precio_final: 0 })));
   };
 
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
+  // ⚡ Perf: búsqueda debounced para no llamar API en cada tecla
+  const debouncedSearch = useDebouncedCallback(async (query: string) => {
     if (query.length >= 1) {
       try {
         setLoading(true);
@@ -131,7 +135,12 @@ export default function CalculatorScreen() {
       setSearchResults([]);
       setShowResults(false);
     }
-  };
+  }, 300);
+
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    debouncedSearch(query);
+  }, [debouncedSearch]);
 
   const selectProduct = (producto: Producto) => {
     setSelectedProduct(producto);

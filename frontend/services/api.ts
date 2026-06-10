@@ -72,10 +72,30 @@ export const matchProductos = (nombres: string[]) =>
   }>>('/match-productos', { nombres });
 
 // Aprendizaje de IA
-export const guardarAprendizaje = (data: {
-  nombre_original: string;
-  producto_id_correcto: string;
-  nombre_producto_correcto: string;
-}) => api.post('/aprender', data);
+export const aprendizajesApi = {
+  guardar: (data: {
+    nombre_original: string;
+    producto_id_correcto: string;
+    nombre_producto_correcto: string;
+  }) => api.post('/aprender', data),
+  getAll: () => api.get<Array<{
+    _id: string;
+    nombre_original: string;
+    nombre_normalizado: string;
+    aliases: string[];
+    aliases_normalizados: string[];
+    producto_id: string;
+    nombre_producto: string;
+    veces_corregido: number;
+  }>>('/aprendizajes'),
+  delete: (id: string) => api.delete(`/aprendizajes/${id}`),
+};
+
+// Alias legacy para compatibilidad con LectorTexto
+export const guardarAprendizaje = aprendizajesApi.guardar;
+// ===== NOTA =====
+// La búsqueda inteligente (smartSearch, busquedaInteligente, inicializarIndice)
+// se importa directamente desde '../services/smartSearch' en los componentes.
+// NO se re-exporta aquí para evitar dependencia circular (api ↔ smartSearch).
 
 export default api;

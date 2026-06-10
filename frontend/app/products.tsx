@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   FlatList,
@@ -24,6 +24,7 @@ import {
 } from 'react-native-paper';
 import { productosApi } from '../services/api';
 import { Producto } from '../types/types';
+import { useDebounceValue } from '../hooks/useDebounce';
 
 export default function ProductsScreen() {
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -42,20 +43,24 @@ export default function ProductsScreen() {
   const [comentarios, setComentarios] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // ⚡ Perf: debounce del filtro local para no re-filtrar en cada tecla
+  const debouncedSearch = useDebounceValue(searchQuery, 250);
+
   useEffect(() => {
     loadProductos();
   }, []);
 
   useEffect(() => {
-    if (searchQuery.trim()) {
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       const filtered = productos.filter(p =>
-        p.nombre.toLowerCase().includes(searchQuery.toLowerCase())
+        p.nombre.toLowerCase().includes(q)
       );
       setFilteredProductos(filtered);
     } else {
       setFilteredProductos(productos);
     }
-  }, [searchQuery, productos]);
+  }, [debouncedSearch, productos]);
 
   const loadProductos = async () => {
     try {
@@ -179,7 +184,8 @@ export default function ProductsScreen() {
     return '$' + price.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
-  const renderProduct = ({ item, index }: { item: Producto; index: number }) => {
+  // ⚡ Perf: memoizar renderProduct con useCallback para evitar re-creación en cada render
+  const renderProduct = useCallback(({ item, index }: { item: Producto; index: number }) => {
     const hasUpdate = item.comentarios?.includes('[Precio actualizado') || 
                       item.comentarios?.includes('[Actualizado desde Excel');
     
@@ -244,7 +250,7 @@ export default function ProductsScreen() {
         </TouchableOpacity>
       </Card>
     );
-  };
+  }, []);
 
   return (
     <View style={styles.container}>

@@ -31,6 +31,7 @@ export interface Cliente {
 
 export interface Calculo {
   _id: string;
+  producto_id?: string;
   nombre_producto: string;
   flujo_nombre: string;
   flujo_id?: string;

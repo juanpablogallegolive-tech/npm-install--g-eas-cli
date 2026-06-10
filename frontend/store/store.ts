@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { Producto, Flujo, Calculo, Cotizacion } from '../types/types';
 import { flujosApi, productosApi, calculosApi, cotizacionesApi } from '../services/api';
 
@@ -121,3 +122,40 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 }));
+
+// ⚡ Perf: Selectores específicos con useShallow para evitar re-renders innecesarios
+// Usar estos hooks en lugar de destructurar múltiples propiedades del store.
+// Ejemplo: const { flujos, fetchFlujos } = useFlujosStore();
+export const useFlujosStore = () =>
+  useStore(
+    useShallow((s) => ({
+      flujos: s.flujos,
+      flujosLoading: s.flujosLoading,
+      flujosVersion: s.flujosVersion,
+      fetchFlujos: s.fetchFlujos,
+      addFlujo: s.addFlujo,
+      updateFlujoInStore: s.updateFlujoInStore,
+      removeFlujo: s.removeFlujo,
+      incrementFlujosVersion: s.incrementFlujosVersion,
+    }))
+  );
+
+export const useProductosStore = () =>
+  useStore(
+    useShallow((s) => ({
+      productos: s.productos,
+      productosLoading: s.productosLoading,
+      fetchProductos: s.fetchProductos,
+      setProductos: s.setProductos,
+    }))
+  );
+
+export const useCalculosStore = () =>
+  useStore(
+    useShallow((s) => ({
+      calculos: s.calculos,
+      loading: s.loading,
+      fetchCalculos: s.fetchCalculos,
+      setCalculos: s.setCalculos,
+    }))
+  );

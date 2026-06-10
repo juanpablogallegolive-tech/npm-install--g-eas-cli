@@ -27,6 +27,7 @@ import { format } from 'date-fns';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
+import { useDebounceValue } from '../hooks/useDebounce';
 
 interface ClienteConPrecio {
   nombre: string;
@@ -113,11 +114,14 @@ export default function QuoteClientScreen() {
     }
   };
 
+  // ⚡ Perf: debounce búsqueda de clientes
+  const debouncedSearchCliente = useDebounceValue(searchCliente, 200);
+
   const clientesFiltrados = useMemo(() => {
-    if (!searchCliente) return clientesDisponibles.slice(0, 20);
-    const q = searchCliente.toLowerCase();
+    if (!debouncedSearchCliente) return clientesDisponibles.slice(0, 20);
+    const q = debouncedSearchCliente.toLowerCase();
     return clientesDisponibles.filter(c => c.toLowerCase().includes(q)).slice(0, 20);
-  }, [searchCliente, clientesDisponibles]);
+  }, [debouncedSearchCliente, clientesDisponibles]);
 
   const productosDelCliente = useMemo(() => {
     if (!clienteSeleccionado) return [];
@@ -370,9 +374,14 @@ export default function QuoteClientScreen() {
                 <IconButton icon="plus" size={24} onPress={agregarFila} mode="contained" />
               </View>
 
-              {items.map((item, index) => (
-                <View key={index}>{renderItem({ item, index })}</View>
-              ))}
+              {/* ⚡ Perf: usar FlatList en lugar de .map() para virtualización */}
+              <FlatList
+                data={items}
+                keyExtractor={(_, index) => `item-${index}`}
+                renderItem={renderItem}
+                scrollEnabled={false}
+                nestedScrollEnabled
+              />
 
               {items.length === 0 && (
                 <Text style={styles.emptyText}>Presiona + para agregar productos</Text>

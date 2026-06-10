@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -19,6 +19,7 @@ import { calculosApi } from '../services/api';
 import { Calculo } from '../types/types';
 import { format } from 'date-fns';
 import { useRouter } from 'expo-router';
+import { useDebounceValue } from '../hooks/useDebounce';
 
 export default function HistoryScreen() {
   const router = useRouter();
@@ -29,13 +30,16 @@ export default function HistoryScreen() {
   const [selectedCalculo, setSelectedCalculo] = useState<Calculo | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
+  // ⚡ Perf: debounce del filtro local
+  const debouncedSearch = useDebounceValue(searchQuery, 250);
+
   useEffect(() => {
     loadCalculos();
   }, []);
 
   useEffect(() => {
     filterCalculos();
-  }, [searchQuery, calculos]);
+  }, [debouncedSearch, calculos]);
 
   const loadCalculos = async () => {
     try {
@@ -51,11 +55,12 @@ export default function HistoryScreen() {
   };
 
   const filterCalculos = () => {
-    if (searchQuery.trim() === '') {
+    if (debouncedSearch.trim() === '') {
       setDisplayedCalculos(calculos);
     } else {
+      const q = debouncedSearch.toLowerCase();
       const filtered = calculos.filter((c) =>
-        c.nombre_producto.toLowerCase().includes(searchQuery.toLowerCase())
+        c.nombre_producto.toLowerCase().includes(q)
       );
       setDisplayedCalculos(filtered);
     }
@@ -98,7 +103,8 @@ export default function HistoryScreen() {
     }
   };
 
-  const renderCalculo = ({ item }: { item: Calculo }) => (
+  // ⚡ Perf: memoizar renderCalculo con useCallback
+  const renderCalculo = useCallback(({ item }: { item: Calculo }) => (
     <Card style={styles.card} onPress={() => verDetalle(item)}>
       <Card.Content>
         <View style={styles.cardHeader}>
@@ -120,7 +126,7 @@ export default function HistoryScreen() {
         </View>
       </Card.Content>
     </Card>
-  );
+  ), []);
 
   return (
     <View style={styles.container}>
