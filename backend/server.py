@@ -578,7 +578,16 @@ SINONIMOS = {
     'pern': ['perno', 'bolt'],
     'conec': ['conector', 'connector'],
     'mang': ['manguera', 'hose'],
-    'flex': ['flexible', 'flexo'],
+    'flex': ['flexible', 'flexo', 'flexometro'],
+    'flexometro': ['metro', 'cinta', 'wincha', 'flex'],
+    'alambre': ['cable', 'hilo'],
+    'rodachin': ['rueda', 'rodaja', 'rodachina', 'garrucha', 'ruedita'],
+    'colbon': ['pegante', 'cola', 'adhesivo', 'pega'],
+    'afix': ['adesivo', 'adhesivo', 'pegante'],
+    'tapa oidos': ['tapon oidos', 'protector auditivo', 'tapones'],
+    'oz': ['onza', 'onzas'],
+    'mts': ['metros', 'm'],
+    'pcs': ['und', 'unidades', 'pz', 'piezas'],
     'rig': ['rigido', 'rigid'],
     # Medidas escritas
     'media': ['1/2', '0.5'],
@@ -1415,6 +1424,10 @@ def match_productos(request: MatchRequest):
                         if palabras_busq and palabras_prod:
                             if normalizar_marca(palabras_busq[0]) == normalizar_marca(palabras_prod[0]):
                                 score = min(1.0, score + 0.1)
+                                
+                        # TIEBREAKER: Si tienen el mismo score, el nombre más corto debe ganar
+                        # Penalizamos ligeramente los nombres más largos (cada palabra extra quita 0.005)
+                        score -= len(palabras_prod) * 0.005
                         
                         if score > mejor_score:
                             segundo_score = mejor_score
