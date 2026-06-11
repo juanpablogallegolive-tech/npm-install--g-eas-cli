@@ -1301,6 +1301,29 @@ def match_productos(request: MatchRequest):
                 "sospechoso": True,
                 "aprendido": False
             } for nombre in request.nombres]
+            
+        # PRE-PROCESAMIENTO DE PRODUCTOS PARA MÁXIMA EFICIENCIA
+        # Evita ejecutar normalizar_texto (con sus múltiples regex) dentro del bucle anidado O(N*M)
+        productos_preprocesados = []
+        for prod in productos:
+            try:
+                prod_expandido = expandir_fracciones(prod.get("nombre", ""))
+                prod_norm = normalizar_texto(prod_expandido)
+                palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
+                
+                marca_producto = None
+                for p in palabras_prod:
+                    if p in MARCAS:
+                        marca_producto = p
+                        break
+                        
+                productos_preprocesados.append({
+                    "original": prod,
+                    "palabras": palabras_prod,
+                    "marca": marca_producto
+                })
+            except:
+                pass
         
         resultados = []
         for nombre_buscar in request.nombres:
@@ -1349,18 +1372,11 @@ def match_productos(request: MatchRequest):
                             if var not in palabras_busq_norm:
                                 palabras_busq_norm.append(var)
                 
-                for prod in productos:
+                for p_data in productos_preprocesados:
                     try:
-                        prod_expandido = expandir_fracciones(prod.get("nombre", ""))
-                        prod_norm = normalizar_texto(prod_expandido)
-                        palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
-                        
-                        # DETECTAR MARCA EN EL PRODUCTO
-                        marca_producto = None
-                        for p in palabras_prod:
-                            if p in MARCAS:
-                                marca_producto = p
-                                break
+                        prod = p_data["original"]
+                        palabras_prod = p_data["palabras"]
+                        marca_producto = p_data["marca"]
                         
                         # SI HAY MARCA BUSCADA, VERIFICAR QUE COINCIDA
                         if marca_buscada:

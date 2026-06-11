@@ -660,7 +660,7 @@ class SmartSearchEngine {
     
     for (const r of resultadosArray) {
       if (sujetoPrincipal && r.score > 0 && r.score >= 0.1) { // Excluir score < 0.1 (aprendidos y exactos de Deep Scanner)
-        const nombreExp = r.producto.nombreExpandido;
+        const nombreExp = (r.producto as any).nombreExpandido || r.producto.nombre;
         const palabrasProd = nombreExp.split(' ');
         
         let sujetoEncontrado = false;
