@@ -391,7 +391,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
                                   onPress={() => cambiarProducto(index, item)}
                                 >
                                   <Text style={styles.resultadoNombre} numberOfLines={2}>{item.nombre}</Text>
-                                  <Text style={styles.resultadoPrecio}>${item.costo_base.toLocaleString()}</Text>
+                                  <Text style={styles.resultadoPrecio}>${(item.precio_venta || item.costo || 0).toLocaleString()}</Text>
                                 </TouchableOpacity>
                               )}
                               style={{ maxHeight: 200 }}
@@ -421,7 +421,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
                               </Text>
                               <Text style={styles.matchSugerido}>{match.producto_sugerido.nombre}</Text>
                               <Text style={styles.matchPrecio}>
-                                ${match.producto_sugerido.costo_base.toLocaleString()}
+                                ${(match.producto_sugerido.precio_venta || match.producto_sugerido.costo || 0).toLocaleString()}
                               </Text>
                               <Text style={styles.matchScore}>
                                 Similitud: {Math.round(match.score * 100)}%
@@ -453,7 +453,7 @@ export default function LectorTexto({ onProductosSeleccionados, onClose, visible
                                 {match.aprendido ? '✓ ' : '→ '}{match.producto_sugerido.nombre}
                               </Text>
                               <Text style={styles.matchPrecio}>
-                                ${match.producto_sugerido.costo_base.toLocaleString()}
+                                ${(match.producto_sugerido.precio_venta || match.producto_sugerido.costo || 0).toLocaleString()}
                               </Text>
                               <View style={styles.matchInfoRow}>
                                 <Text style={styles.matchScore}>

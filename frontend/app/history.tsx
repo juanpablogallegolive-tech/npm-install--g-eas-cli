@@ -178,7 +178,7 @@ export default function HistoryScreen() {
               
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Costo Base:</Text>
-                <Text style={styles.detailValue}>${selectedCalculo.costo_base.toLocaleString()}</Text>
+                <Text style={styles.detailValue}>${(selectedCalculo.costo_base || 0).toLocaleString()}</Text>
               </View>
 
               <Text style={styles.clientesTitle}>Clientes:</Text>

@@ -47,8 +47,8 @@ export default function ImportExportScreen() {
     // Crear datos para el Excel con columnas separadas
     const data = productos.map((p) => ({
       'Nombre': String(p.nombre || ''),
-      'Costo_Original': p.costo_original || 0,
-      'Costo_Base': p.costo_base || 0,
+      'Costo': p.costo || 0,
+      'Precio_Venta': p.precio_venta || 0,
       'Comentarios': String(p.comentarios || ''),
     }));
 
@@ -58,8 +58,8 @@ export default function ImportExportScreen() {
     // Ajustar ancho de columnas
     ws['!cols'] = [
       { wch: 40 }, // Nombre
-      { wch: 15 }, // Costo_Original
-      { wch: 15 }, // Costo_Base
+      { wch: 15 }, // Costo
+      { wch: 15 }, // Precio_Venta
       { wch: 30 }, // Comentarios
     ];
 
@@ -100,15 +100,15 @@ export default function ImportExportScreen() {
       if (productos.length === 0) {
         productosData = [{
           'Nombre': 'PRODUCTO EJEMPLO (borrar)',
-          'Costo_Original': 1000,
-          'Costo_Base': 1200,
+          'Costo': 1000,
+          'Precio_Venta': 1200,
           'Comentarios': 'Ejemplo',
         }];
       } else {
         productosData = productos.map((p: any) => ({
           'Nombre': String(p.nombre || ''),
-          'Costo_Original': p.costo_original || 0,
-          'Costo_Base': p.costo_base || 0,
+          'Costo': p.costo || 0,
+          'Precio_Venta': p.precio_venta || 0,
           'Comentarios': String(p.comentarios || ''),
         }));
       }
@@ -139,7 +139,7 @@ export default function ImportExportScreen() {
               historialData.push({
                 'Producto': h.nombre_producto || '',
                 'Flujo': h.flujo_nombre || '',
-                'Costo_Base': h.costo_base || 0,
+                'Costo': h.costo_base || 0,
                 'Precio_Calculado': h.precio_calculado || 0,
                 'Cliente': c.nombre || '',
                 'Ganancia_%': c.porcentaje_ganancia || 0,
@@ -151,7 +151,7 @@ export default function ImportExportScreen() {
             historialData.push({
               'Producto': h.nombre_producto || '',
               'Flujo': h.flujo_nombre || '',
-              'Costo_Base': h.costo_base || 0,
+              'Costo': h.costo_base || 0,
               'Precio_Calculado': h.precio_calculado || 0,
               'Cliente': '',
               'Ganancia_%': 0,
@@ -288,7 +288,7 @@ export default function ImportExportScreen() {
       setStatus('Leyendo archivo...');
       setProgress(0.2);
 
-      let productos: { nombre: string; costo_original: number; costo_base: number }[] = [];
+      let productos: { nombre: string; costo: number; precio_venta: number }[] = [];
 
       if (isExcel) {
         // Leer archivo Excel
@@ -304,8 +304,8 @@ export default function ImportExportScreen() {
           
           productos = jsonData.map((row: any) => ({
             nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
-            costo_original: parseFloat(row['Costo_Original'] || row['costo_original'] || row['COSTO_ORIGINAL'] || 0) || 0,
-            costo_base: parseFloat(row['Costo_Base'] || row['costo_base'] || row['COSTO_BASE'] || row['Precio'] || 0) || 0,
+            costo: parseFloat(row['Costo'] || row['costo'] || row['COSTO'] || row['Costo_Original'] || row['costo_original'] || 0) || 0,
+            precio_venta: parseFloat(row['Precio_Venta'] || row['precio_venta'] || row['PRECIO_VENTA'] || row['Costo_Base'] || row['costo_base'] || row['Precio'] || 0) || 0,
           }));
         } else {
           fileContent = await FileSystem.readAsStringAsync(file.uri, {
@@ -319,8 +319,8 @@ export default function ImportExportScreen() {
           
           productos = jsonData.map((row: any) => ({
             nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
-            costo_original: parseFloat(row['Costo_Original'] || row['costo_original'] || row['COSTO_ORIGINAL'] || 0) || 0,
-            costo_base: parseFloat(row['Costo_Base'] || row['costo_base'] || row['COSTO_BASE'] || row['Precio'] || 0) || 0,
+            costo: parseFloat(row['Costo'] || row['costo'] || row['COSTO'] || row['Costo_Original'] || row['costo_original'] || 0) || 0,
+            precio_venta: parseFloat(row['Precio_Venta'] || row['precio_venta'] || row['PRECIO_VENTA'] || row['Costo_Base'] || row['costo_base'] || row['Precio'] || 0) || 0,
           }));
         }
       } else {
@@ -348,8 +348,8 @@ export default function ImportExportScreen() {
 
         const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
         const iNombre = header.findIndex(h => h.includes('nombre') || h.includes('name'));
-        const iCostoBase = header.findIndex(h => h.includes('base') || h.includes('precio'));
-        const iCostoOrig = header.findIndex(h => h.includes('original'));
+        const iCosto = header.findIndex(h => h.includes('costo') && !h.includes('venta'));
+        const iPrecioVenta = header.findIndex(h => h.includes('venta') || h.includes('precio'));
 
         if (iNombre === -1) {
           Alert.alert('Error', 'No se encontró columna Nombre');
@@ -362,8 +362,8 @@ export default function ImportExportScreen() {
           if (nombre) {
             productos.push({
               nombre,
-              costo_original: parseFloat(cols[iCostoOrig] || cols[iCostoBase] || '0') || 0,
-              costo_base: parseFloat(cols[iCostoBase] || cols[iCostoOrig] || '0') || 0,
+              costo: parseFloat(cols[iCosto] || '0') || 0,
+              precio_venta: parseFloat(cols[iPrecioVenta] || cols[iCosto] || '0') || 0,
             });
           }
         }
@@ -390,26 +390,26 @@ export default function ImportExportScreen() {
 
       for (let i = 0; i < productos.length; i++) {
         try {
-          const { nombre, costo_original, costo_base } = productos[i];
+          const { nombre, costo, precio_venta } = productos[i];
           
           if (!nombre) { errores++; continue; }
 
           const existing = existingMap.get(nombre.toLowerCase().trim());
 
           if (existing) {
-            if (Math.abs(existing.costo_base - costo_base) > 0.01) {
+            if (Math.abs((existing.precio_venta || 0) - precio_venta) > 0.01) {
               await productosApi.update(existing._id, {
                 ...existing,
-                costo_base,
-                costo_original,
-                comentarios: (existing.comentarios || '') + `\n[Actualizado: ${new Date().toLocaleDateString()}]`,
+                costo,
+                precio_venta,
+                comentarios: (existing.comentarios || '') + `\n[Actualizado desde Excel: ${new Date().toLocaleDateString()}]`,
               });
               actualizados++;
             } else {
               sinCambios++;
             }
           } else {
-            await productosApi.create({ nombre, costo_original, costo_base, comentarios: '' });
+            await productosApi.create({ nombre, costo, precio_venta, comentarios: '' });
             nuevos++;
           }
 

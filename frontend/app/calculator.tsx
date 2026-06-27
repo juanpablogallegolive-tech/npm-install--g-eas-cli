@@ -145,7 +145,7 @@ export default function CalculatorScreen() {
   const selectProduct = (producto: Producto) => {
     setSelectedProduct(producto);
     setSearchQuery(producto.nombre);
-    setCostoBaseEditable(producto.costo_base.toString());
+    setCostoBaseEditable((producto.costo || 0).toString());
     setShowResults(false);
     Keyboard.dismiss();
     resetPrecios();
@@ -433,7 +433,7 @@ export default function CalculatorScreen() {
                   {searchResults.map((producto) => (
                     <TouchableOpacity key={producto._id} onPress={() => selectProduct(producto)} style={styles.resultItem}>
                       <Text style={styles.resultTitle} numberOfLines={2}>{producto.nombre}</Text>
-                      <Text style={styles.resultPrice}>${producto.costo_base.toLocaleString()}</Text>
+                      <Text style={styles.resultPrice}>${(producto.costo || 0).toLocaleString()}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>

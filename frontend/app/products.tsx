@@ -38,8 +38,8 @@ export default function ProductsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Producto | null>(null);
   const [nombre, setNombre] = useState('');
-  const [costoOriginal, setCostoOriginal] = useState('');
-  const [costoBase, setCostoBase] = useState('');
+  const [costo, setCosto] = useState('');
+  const [precioVenta, setPrecioVenta] = useState('');
   const [comentarios, setComentarios] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -88,8 +88,8 @@ export default function ProductsScreen() {
   const openNewProduct = () => {
     setEditingProduct(null);
     setNombre('');
-    setCostoOriginal('');
-    setCostoBase('');
+    setCosto('');
+    setPrecioVenta('');
     setComentarios('');
     setModalVisible(true);
   };
@@ -97,8 +97,8 @@ export default function ProductsScreen() {
   const openEditProduct = (producto: Producto) => {
     setEditingProduct(producto);
     setNombre(producto.nombre);
-    setCostoOriginal(producto.costo_original.toString());
-    setCostoBase(producto.costo_base.toString());
+    setCosto((producto.costo || 0).toString());
+    setPrecioVenta((producto.precio_venta || 0).toString());
     setComentarios(producto.comentarios || '');
     setModalVisible(true);
   };
@@ -109,33 +109,33 @@ export default function ProductsScreen() {
       return;
     }
 
-    const costoOrig = parseFloat(costoOriginal) || 0;
-    const costoB = parseFloat(costoBase) || costoOrig;
+    const costoVal = parseFloat(costo) || 0;
+    const precioVentaVal = parseFloat(precioVenta) || 0;
 
     try {
       setSaving(true);
 
       if (editingProduct) {
-        const precioAnterior = editingProduct.costo_base;
+        const precioAnterior = editingProduct.precio_venta || 0;
         let nuevoComentario = comentarios;
         
-        if (precioAnterior !== costoB) {
+        if (precioAnterior !== precioVentaVal && precioAnterior > 0) {
           const fecha = new Date().toLocaleDateString('es-CO');
-          nuevoComentario = `${comentarios}\n[Precio actualizado: $${precioAnterior.toLocaleString()} → $${costoB.toLocaleString()} el ${fecha}]`.trim();
+          nuevoComentario = `${comentarios}\n[Precio actualizado: $${precioAnterior.toLocaleString()} → $${precioVentaVal.toLocaleString()} el ${fecha}]`.trim();
         }
 
         await productosApi.update(editingProduct._id, {
           nombre: nombre.trim(),
-          costo_original: costoOrig,
-          costo_base: costoB,
+          costo: costoVal,
+          precio_venta: precioVentaVal,
           comentarios: nuevoComentario,
         });
         Alert.alert('Éxito', 'Producto actualizado');
       } else {
         await productosApi.create({
           nombre: nombre.trim(),
-          costo_original: costoOrig,
-          costo_base: costoB,
+          costo: costoVal,
+          precio_venta: precioVentaVal,
           comentarios,
         });
         Alert.alert('Éxito', 'Producto creado');
@@ -205,19 +205,17 @@ export default function ProductsScreen() {
                   {item.nombre}
                 </Text>
                 <View style={styles.priceRow}>
-                  <Text style={styles.priceLabel}>Base:</Text>
-                  <Text style={styles.productPrice}>
-                    {formatPrice(item.costo_base)}
+                  <Text style={styles.priceLabel}>Costo:</Text>
+                  <Text style={styles.productOriginal}>
+                    {formatPrice(item.costo || 0)}
                   </Text>
                 </View>
-                {item.costo_original !== item.costo_base && (
-                  <View style={styles.priceRow}>
-                    <Text style={styles.priceLabel}>Original:</Text>
-                    <Text style={styles.productOriginal}>
-                      {formatPrice(item.costo_original)}
-                    </Text>
-                  </View>
-                )}
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Venta:</Text>
+                  <Text style={styles.productPrice}>
+                    {formatPrice(item.precio_venta || 0)}
+                  </Text>
+                </View>
                 {hasUpdate && (
                   <Chip 
                     mode="flat" 
@@ -360,9 +358,9 @@ export default function ProductsScreen() {
               <View style={styles.priceInputRow}>
                 <TextInput
                   mode="outlined"
-                  label="Costo Original"
-                  value={costoOriginal}
-                  onChangeText={setCostoOriginal}
+                  label="Costo"
+                  value={costo}
+                  onChangeText={setCosto}
                   keyboardType="numeric"
                   style={[styles.input, styles.halfInput]}
                   left={<TextInput.Affix text="$" />}
@@ -372,9 +370,9 @@ export default function ProductsScreen() {
                 
                 <TextInput
                   mode="outlined"
-                  label="Costo Base"
-                  value={costoBase}
-                  onChangeText={setCostoBase}
+                  label="Precio Venta"
+                  value={precioVenta}
+                  onChangeText={setPrecioVenta}
                   keyboardType="numeric"
                   style={[styles.input, styles.halfInput]}
                   left={<TextInput.Affix text="$" />}
@@ -395,11 +393,11 @@ export default function ProductsScreen() {
                 activeOutlineColor="#6200ee"
               />
 
-              {editingProduct && editingProduct.costo_base !== parseFloat(costoBase) && costoBase && (
+              {editingProduct && (editingProduct.precio_venta || 0) !== parseFloat(precioVenta) && precioVenta && (
                 <View style={styles.priceChangeWarning}>
                   <IconButton icon="alert" size={18} iconColor="#ff9800" />
                   <Text style={styles.warningText}>
-                    El precio será actualizado y se registrará el cambio
+                    El precio de venta será actualizado y se registrará el cambio
                   </Text>
                 </View>
               )}

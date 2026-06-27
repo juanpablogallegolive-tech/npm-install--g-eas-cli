@@ -34,7 +34,7 @@ interface ClienteConPrecio {
   producto: string;
   precio_final: number;
   porcentaje_ganancia: number;
-  costo_base: number;
+  costo: number;
 }
 
 export default function QuoteClientScreen() {
@@ -91,7 +91,7 @@ export default function QuoteClientScreen() {
                 producto: calc.nombre_producto,
                 precio_final: cliente.precio_final,
                 porcentaje_ganancia: cliente.porcentaje_ganancia,
-                costo_base: calc.costo_base,
+                costo: calc.costo_base,
               });
             }
           });

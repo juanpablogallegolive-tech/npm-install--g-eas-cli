@@ -70,8 +70,8 @@ class FlujoResponse(Flujo):
 
 class Producto(BaseModel):
     nombre: str
-    costo_original: float
-    costo_base: float
+    costo: float = 0           # Costo del producto
+    precio_venta: float = 0    # Precio de venta al público
     flujo_id: Optional[str] = None
     comentarios: Optional[str] = ""
     fecha_creacion: Optional[datetime] = None
@@ -430,12 +430,17 @@ def guardar_calculo(calculo: Calculo):
     calculo_dict = calculo.model_dump()
     calculo_dict["fecha"] = datetime.now()
     
-    # Actualizar el costo_base del producto en la base de datos
+    # Actualizar costo y precio_venta del producto en la base de datos
     if calculo.producto_id:
         try:
+            # precio_venta = precio del primer cliente (si existe)
+            precio_venta = calculo.clientes[0].precio_final if calculo.clientes else 0
             productos_col.update_one(
                 {"_id": ObjectId(calculo.producto_id)},
-                {"$set": {"costo_base": calculo.costo_base}}
+                {"$set": {
+                    "costo": calculo.costo_base,
+                    "precio_venta": precio_venta
+                }}
             )
         except:
             pass  # Si falla, continuar guardando el cálculo
@@ -1291,7 +1296,7 @@ def eliminar_aprendizaje(id: str):
 def match_productos(request: MatchRequest):
     """Busca productos similares para cada nombre dado - SIEMPRE devuelve resultados"""
     try:
-        productos = list(productos_col.find({}, {"nombre": 1, "costo_base": 1}).limit(5000))
+        productos = list(productos_col.find({}, {"nombre": 1, "costo": 1, "precio_venta": 1}).limit(5000))
         
         if not productos:
             return [{

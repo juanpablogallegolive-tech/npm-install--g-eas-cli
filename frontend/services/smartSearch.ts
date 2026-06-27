@@ -5,20 +5,21 @@ import { productosApi, aprendizajesApi } from './api';
 
 // ==================== CONFIGURACIÓN ====================
 
-const FUSE_OPTIONS: IFuseOptions<Producto> = {
+const FUSE_OPTIONS: IFuseOptions<ProductoBuscable> = {
   keys: [
     { name: 'nombre', weight: 1.0 },
-    { name: 'nombreNormalizado', weight: 0.9 },
-    { name: 'nombreExpandido', weight: 0.8 },
+    { name: 'nombreNormalizado', weight: 0.95 },  // Subido para priorizar normalizado
+    { name: 'nombreExpandido', weight: 0.85 },
   ],
-  threshold: 0.4,          // 0 = exacto, 1 = todo coincide. 0.4 es buen balance
-  distance: 200,            // Distancia máxima de caracteres para considerar match
+  threshold: 0.35,          // Más estricto (era 0.4)
+  distance: 150,            // Reducido (era 200)
   minMatchCharLength: 2,    // Mínimo 2 caracteres para considerar
   includeScore: true,       // Incluir score en resultados
   shouldSort: true,         // Ordenar por relevancia
   findAllMatches: true,     // Buscar en todo el string, no solo al inicio
   ignoreLocation: true,     // No penalizar por posición en el string
   useExtendedSearch: true,  // Habilitar búsqueda extendida
+  isCaseSensitive: false,   // Explícitamente insensible a mayúsculas
 };
 
 // ==================== SINÓNIMOS Y NORMALIZACIONES ====================
@@ -28,16 +29,72 @@ const SINONIMOS: Record<string, string[]> = {
   'pvc': ['plastico', 'vinyl', 'vinilo'],
   'galv': ['galvanizado', 'hg', 'hierro galvanizado'],
   'galvanizado': ['galv', 'hg'],
-  'inox': ['inoxidable', 'acero inoxidable'],
+  'inox': ['inoxidable', 'acero inoxidable', 'ss'],
   'acero': ['ac', 'steel'],
   'bronce': ['bro', 'cafe', 'café', 'bronze'],
   'cobre': ['cob', 'copper'],
   'aluminio': ['alu', 'aluminum'],
-  // Productos
+  'hierro': ['fe', 'fierro', 'hro'],
+  'laton': ['brass', 'amarillo'],
+  'zinc': ['zn', 'galva'],
+  'cromo': ['cromado', 'chrome'],
+  'acrilico': ['acrylic', 'pmma'],
+  'polietileno': ['pe', 'hdpe', 'ldpe'],
+  'polipropileno': ['pp'],
+  'madera': ['mad', 'wood'],
+  
+  // Productos - Tubería y accesorios
   'tubo': ['tuberia', 'tb', 'tbo', 'pipe'],
   'tuberia': ['tubo', 'tb'],
   'valvula': ['val', 'valv', 'valve'],
   'griferia': ['llave', 'mezclador', 'canilla', 'grifo'],
+  'codo': ['cod', 'elbow', 'curva'],
+  'tee': ['te', 't'],
+  'reduccion': ['red', 'reductor', 'reducer'],
+  'union': ['uni', 'acople', 'coupling'],
+  'niple': ['nip', 'nipple'],
+  'tapon': ['tap', 'plug', 'cap'],
+  'sifon': ['trampa', 'trap'],
+  'llave paso': ['registro', 'valvula paso', 'stopcock'],
+  
+  // Productos - Tornillería
+  'tornillo': ['torn', 'screw', 'bolt'],
+  'tuerca': ['tuer', 'nut'],
+  'arandela': ['aran', 'washer'],
+  'clavo': ['clav', 'nail'],
+  'perno': ['pern', 'bolt'],
+  'hex': ['hexagonal', 'hexagono'],
+  'allen': ['bristol', 'hexagonal interno'],
+  'phillips': ['estrella', 'cruz', 'ph'],
+  'plano': ['ranura', 'slot', 'flat', 'av', 'avellanado'],
+  'autorroscante': ['autoperforante', 'drywall', 'punta broca'],
+  
+  // Productos - Herramientas
+  'martillo': ['mazo', 'combo', 'hammer'],
+  'destornillador': ['desarmador', 'atornillador', 'screwdriver'],
+  'llave': ['espaner', 'spanner', 'wrench'],
+  'alicate': ['pinza', 'tenaza', 'pliers'],
+  'taladro': ['rotomartillo', 'percutor', 'drill', 'perforadora'],
+  'sierra': ['serrucho', 'caladora', 'saw'],
+  'nivel': ['nivelador', 'level'],
+  'metro': ['cinta metrica', 'flexo', 'huincha'],
+  'flexometro': ['metro', 'cinta', 'wincha', 'flex'],
+  
+  // Productos - Electricidad
+  'cable': ['alambre', 'conductor', 'wire', 'hilo'],
+  'enchufe': ['toma', 'tomacorriente', 'outlet'],
+  'interruptor': ['switch', 'apagador', 'suiche'],
+  'bombillo': ['bombilla', 'foco', 'bulb', 'led'],
+  'breaker': ['breker', 'tacos', 'taco', 'interruptor termico'],
+  'canaleta': ['ducto', 'canal'],
+  
+  // Productos - Plomería
+  'sanitario': ['inodoro', 'taza', 'toilet', 'wc'],
+  'lavamanos': ['lavabo', 'sink'],
+  'ducha': ['regadera', 'shower'],
+  'tanque': ['cisterna', 'tank'],
+  
+  // Productos - Varios
   'quemado': ['negro', 'amarre', 'recocido'],
   'pega': ['pegante', 'pegamento', 'cola', 'adhesivo', 'silicona'],
   'goma': ['pegante', 'pegamento', 'cola', 'adhesivo', 'silicona'],
@@ -52,33 +109,39 @@ const SINONIMOS: Record<string, string[]> = {
   'incolma': ['incol'],
   'premium': ['premiun'],
   'premiun': ['premium'],
-  'codo': ['cod', 'elbow', 'curva'],
-  'tee': ['te', 't'],
-  'reduccion': ['red', 'reductor', 'reducer'],
-  'union': ['uni', 'acople', 'coupling'],
-  'niple': ['nip', 'nipple'],
-  'tapon': ['tap', 'plug', 'cap'],
   'abrazadera': ['abr', 'clamp'],
-  'tornillo': ['torn', 'screw', 'bolt'],
-  'tuerca': ['tuer', 'nut'],
-  'arandela': ['aran', 'washer'],
-  'clavo': ['clav', 'nail'],
-  'perno': ['pern', 'bolt'],
   'manguera': ['mang', 'hose'],
-  'flexible': ['flex', 'flexo', 'flexometro'],
-  'flexometro': ['metro', 'cinta', 'wincha', 'flex'],
-  'alambre': ['cable', 'hilo'],
+  'flexible': ['flex', 'flexo'],
   'rodachin': ['rueda', 'rodaja', 'rodachina', 'garrucha', 'ruedita'],
   'colbon': ['pegante', 'cola', 'adhesivo', 'pega'],
   'afix': ['adesivo', 'adhesivo', 'pegante'],
   'tapa oidos': ['tapon oidos', 'protector auditivo', 'tapones'],
-  'oz': ['onza', 'onzas'],
-  'mts': ['metros', 'm'],
-  'pcs': ['und', 'unidades', 'pz', 'piezas'],
-  // Medidas
+  'broca': ['mecha', 'bit'],
+  'disco': ['rueda', 'wheel'],
+  'lija': ['abrasivo', 'sandpaper'],
+  'cinta': ['tape', 'masking'],
+  
+  // Medidas y unidades
   'media': ['1/2', '0.5'],
   'cuarto': ['1/4', '0.25'],
   'pulgada': ['"', 'pulg', 'inch'],
+  'pulgadas': ['pul', 'pulg'],
+  'mm': ['milimetro', 'milimetros'],
+  'cm': ['centimetro', 'centimetros'],
+  'mt': ['metro', 'metros', 'm', 'mts'],
+  'kg': ['kilo', 'kilos', 'kilogramo'],
+  'lb': ['libra', 'libras'],
+  'gal': ['galon', 'galones'],
+  'lt': ['litro', 'litros', 'l'],
+  'oz': ['onza', 'onzas'],
+  'mts': ['metros', 'm'],
+  'pcs': ['und', 'unidades', 'pz', 'piezas'],
+  'c/u': ['cada uno', 'unidad'],
+  'pza': ['pieza', 'pz', 'pcs'],
+  'cja': ['caja', 'box'],
+  'bto': ['bulto', 'bolsa'],
+  'rollo': ['rll', 'rl'],
+  
   // Colores
   'blanco': ['bco', 'white'],
   'negro': ['ngo', 'black'],
@@ -86,14 +149,19 @@ const SINONIMOS: Record<string, string[]> = {
   'azul': ['azl', 'blue'],
   'verde': ['vde', 'green'],
   'amarillo': ['ama', 'yellow'],
+  'gris': ['grey', 'gray'],
   'dorado': ['oro', 'dorada', 'gold'],
   'oro': ['dorado', 'dorada', 'gold'],
   'plateado': ['plata', 'plateada', 'silver'],
   'plata': ['plateado', 'plateada', 'silver'],
+  'transparente': ['cristal', 'clear'],
+  
   // Marcas comunes (variaciones de escritura)
   'uduke': ['uduque', 'udukwe'],
   'discoveri': ['discovery', 'discoberi'],
-  'pulgadas': ['pul', 'pulg'],
+  'total': ['totals'],
+  'dewalt': ['de walt'],
+  'black decker': ['blackdecker', 'b&d'],
 };
 
 // Crear mapa inverso de sinónimos
@@ -242,6 +310,90 @@ function removeAccents(str: string): string {
 }
 
 /**
+ * Corrige errores típicos de OCR (caracteres confundidos)
+ */
+function corregirErroresOCR(texto: string): string {
+  let res = texto;
+  
+  // Caracteres confundidos por OCR
+  const reemplazosOCR: [RegExp, string][] = [
+    [/\bO(\d)/g, '0$1'],        // O seguido de número → 0
+    [/(\d)O\b/g, '$10'],        // número seguido de O → 0
+    [/\bl(\d)/gi, '1$1'],       // l minúscula seguido de número → 1
+    [/(\d)l\b/gi, '$11'],       // número seguido de l → 1
+    [/\bI(\d)/g, '1$1'],        // I mayúscula seguido de número → 1
+    [/(\d)I\b/g, '$11'],        // número seguido de I → 1
+    [/\bS(\d)/g, '5$1'],        // S seguido de número → 5
+    [/(\d)S\b/g, '$15'],        // número seguido de S → 5
+    [/\bB(\d)/g, '8$1'],        // B seguido de número → 8
+    [/(\d)B\b/g, '$18'],        // número seguido de B → 8
+    [/rn/g, 'm'],               // rn → m (común en fuentes sans-serif)
+    [/vv/g, 'w'],               // vv → w
+    [/\bcI\b/gi, 'cl'],         // cI → cl
+    [/\bpIa/gi, 'pla'],         // pIa → pla
+    [/\btorn\s*i\s*llo/gi, 'tornillo'], // torn i llo → tornillo
+    [/\btuber\s*i\s*a/gi, 'tuberia'],   // tuber i a → tuberia
+  ];
+  
+  for (const [regex, reemplazo] of reemplazosOCR) {
+    res = res.replace(regex, reemplazo);
+  }
+  
+  return res;
+}
+
+/**
+ * Normaliza unidades de medida a formato canónico
+ */
+function normalizarUnidades(texto: string): string {
+  let res = texto;
+  
+  const unidades: [RegExp, string][] = [
+    // Longitud
+    [/\b(\d+)\s*milimetros?\b/gi, '$1mm'],
+    [/\b(\d+)\s*centimetros?\b/gi, '$1cm'],
+    [/\b(\d+)\s*metros?\b/gi, '$1mt'],
+    [/\b(\d+)\s*mts\b/gi, '$1mt'],
+    [/\b(\d+)\s*pulgadas?\b/gi, '$1pulg'],
+    [/\b(\d+)\s*pulg\b/gi, '$1pulg'],
+    [/\b(\d+)\s*["″]\s*/g, '$1pulg'],
+    [/\b(\d+)\s*pies?\b/gi, '$1ft'],
+    [/\b(\d+)\s*ft\b/gi, '$1ft'],
+    
+    // Peso
+    [/\b(\d+)\s*kilogramos?\b/gi, '$1kg'],
+    [/\b(\d+)\s*kilos?\b/gi, '$1kg'],
+    [/\b(\d+)\s*gramos?\b/gi, '$1g'],
+    [/\b(\d+)\s*libras?\b/gi, '$1lb'],
+    [/\b(\d+)\s*onzas?\b/gi, '$1oz'],
+    
+    // Volumen
+    [/\b(\d+)\s*litros?\b/gi, '$1lt'],
+    [/\b(\d+)\s*mililitros?\b/gi, '$1ml'],
+    [/\b(\d+)\s*galones?\b/gi, '$1gal'],
+    [/\b(\d+)\s*cc\b/gi, '$1ml'],
+    
+    // Electricidad
+    [/\b(\d+)\s*voltios?\b/gi, '$1v'],
+    [/\b(\d+)\s*volts?\b/gi, '$1v'],
+    [/\b(\d+)\s*amperios?\b/gi, '$1a'],
+    [/\b(\d+)\s*amps?\b/gi, '$1a'],
+    [/\b(\d+)\s*watts?\b/gi, '$1w'],
+    [/\b(\d+)\s*vatios?\b/gi, '$1w'],
+    
+    // AWG (calibre de cables)
+    [/\b(\d+)\s*awg\b/gi, '$1awg'],
+    [/\bcalibre\s*(\d+)\b/gi, '$1awg'],
+  ];
+  
+  for (const [regex, reemplazo] of unidades) {
+    res = res.replace(regex, reemplazo);
+  }
+  
+  return res;
+}
+
+/**
  * Normaliza fracciones escritas o mal espaciadas
  */
 function normalizarMedidas(texto: string): string {
@@ -300,8 +452,16 @@ function normalizar(texto: string): string {
   if (!texto) return '';
   let norm = removeAccents(texto).toLowerCase().trim();
   
+  // Aplicar correcciones OCR antes de todo
+  norm = corregirErroresOCR(norm);
+  
+  // Normalizar medidas y fracciones
   norm = normalizarMedidas(norm);
   
+  // Normalizar unidades
+  norm = normalizarUnidades(norm);
+  
+  // Limpiar caracteres especiales
   norm = norm.replace(/[^a-z0-9\s/.\-]/g, ' ');
   norm = norm.replace(/\s+/g, ' ').trim();
   return norm;
@@ -465,17 +625,31 @@ class SmartSearchEngine {
       }
     }
 
-    // Match por alta similitud (>0.85)
+    // Match por alta similitud (>0.85) usando Levenshtein + N-gramas
+    let mejorApr: AprendizajeLocal | null = null;
+    let mejorScore = 0;
+    
     for (const apr of this.aprendizajes) {
-      const simNombre = levenshteinSimilarity(queryNorm, apr.nombre_normalizado);
-      if (simNombre > 0.85) {
-        return this.productos.find(p => p._id === apr.producto_id) || null;
-      }
+      // Comparar con nombre principal
+      const simLev = levenshteinSimilarity(queryNorm, apr.nombre_normalizado);
+      const simNGram = similitudNGramas(queryNorm, apr.nombre_normalizado, 3);
+      let score = Math.max(simLev, simNGram);
+      
+      // Comparar con aliases
       for (const alias of apr.aliases_normalizados) {
-        if (levenshteinSimilarity(queryNorm, alias) > 0.85) {
-          return this.productos.find(p => p._id === apr.producto_id) || null;
-        }
+        const aliasSimLev = levenshteinSimilarity(queryNorm, alias);
+        const aliasSimNGram = similitudNGramas(queryNorm, alias, 3);
+        score = Math.max(score, aliasSimLev, aliasSimNGram);
       }
+      
+      if (score > mejorScore && score > 0.85) {
+        mejorScore = score;
+        mejorApr = apr;
+      }
+    }
+    
+    if (mejorApr) {
+      return this.productos.find(p => p._id === mejorApr!.producto_id) || null;
     }
 
     return null;
@@ -832,6 +1006,44 @@ function levenshteinSimilarity(s1: string, s2: string): number {
   
   const dist = previousRow[len2];
   return 1 - dist / Math.max(len1, len2);
+}
+
+/**
+ * Genera n-gramas de un texto para matching parcial
+ */
+function generarNGramas(texto: string, n: number = 3): Set<string> {
+  const ngrams = new Set<string>();
+  const palabras = texto.split(' ');
+  
+  for (const palabra of palabras) {
+    if (palabra.length >= n) {
+      for (let i = 0; i <= palabra.length - n; i++) {
+        ngrams.add(palabra.substring(i, i + n));
+      }
+    } else if (palabra.length > 0) {
+      ngrams.add(palabra);
+    }
+  }
+  
+  return ngrams;
+}
+
+/**
+ * Calcula similitud por n-gramas (Coeficiente de Jaccard)
+ */
+function similitudNGramas(texto1: string, texto2: string, n: number = 3): number {
+  const ng1 = generarNGramas(texto1, n);
+  const ng2 = generarNGramas(texto2, n);
+  
+  if (ng1.size === 0 || ng2.size === 0) return 0;
+  
+  let interseccion = 0;
+  for (const ng of ng1) {
+    if (ng2.has(ng)) interseccion++;
+  }
+  
+  const union = ng1.size + ng2.size - interseccion;
+  return interseccion / union;
 }
 
 /**

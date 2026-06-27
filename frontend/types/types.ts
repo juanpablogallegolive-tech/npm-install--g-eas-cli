@@ -1,8 +1,8 @@
 export interface Producto {
   _id: string;
   nombre: string;
-  costo_original: number;
-  costo_base: number;
+  costo: number;           // Costo del producto
+  precio_venta: number;    // Precio de venta al público
   flujo_id?: string;
   comentarios?: string;
   fecha_creacion?: string;
