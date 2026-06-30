@@ -98,11 +98,12 @@ export default function ImportExportScreen() {
       // HOJA 1: Productos
       let productosData: any[];
       if (productos.length === 0) {
+        // Template vacío - solo encabezados
         productosData = [{
-          'Nombre': 'PRODUCTO EJEMPLO (borrar)',
-          'Costo': 1000,
-          'Precio_Venta': 1200,
-          'Comentarios': 'Ejemplo',
+          'Nombre': '',
+          'Costo': '',
+          'Precio_Venta': '',
+          'Comentarios': '',
         }];
       } else {
         productosData = productos.map((p: any) => ({
@@ -121,14 +122,15 @@ export default function ImportExportScreen() {
       // HOJA 2: Historial
       let historialData: any[];
       if (historial.length === 0) {
+        // Template vacío - solo encabezados
         historialData = [{
-          'Producto': 'EJEMPLO',
-          'Flujo': 'Flujo ejemplo',
-          'Costo_Base': 0,
-          'Precio_Calculado': 0,
-          'Cliente': 'Cliente ejemplo',
-          'Ganancia_%': 0,
-          'Precio_Final': 0,
+          'Producto': '',
+          'Flujo': '',
+          'Costo': '',
+          'Precio_Calculado': '',
+          'Cliente': '',
+          'Ganancia_%': '',
+          'Precio_Final': '',
           'Fecha': '',
         }];
       } else {
@@ -170,11 +172,12 @@ export default function ImportExportScreen() {
       // HOJA 3: Flujos
       let flujosData: any[];
       if (flujos.length === 0) {
+        // Template vacío - solo encabezados
         flujosData = [{
-          'Nombre_Flujo': 'FLUJO EJEMPLO',
-          'Operacion': 'Operacion ejemplo',
-          'Tipo_Operacion': 'suma',
-          'Tipo_Valor': 'porcentaje',
+          'Nombre_Flujo': '',
+          'Operacion': '',
+          'Tipo_Operacion': '',
+          'Tipo_Valor': '',
         }];
       } else {
         flujosData = [];
