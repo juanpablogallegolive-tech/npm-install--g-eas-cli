@@ -132,6 +132,17 @@ class CalcularPrecioRequest(BaseModel):
 
 # ==================== HELPERS ====================
 
+# Colores para búsqueda inteligente (usado en buscar_productos)
+COLORES = {'blanco', 'negro', 'rojo', 'azul', 'verde', 'amarillo', 'gris', 'dorado', 'plateado', 'bronce', 'cafe', 'naranja', 'morado', 'rosa', 'transparente'}
+
+# Sinónimos básicos para búsqueda (versión simplificada al inicio)
+SINONIMOS_BASICO = {
+    'torn': 'tornillo', 'tubo': 'tuberia', 'val': 'valvula', 'llav': 'llave',
+    'pvc': 'plastico', 'galv': 'galvanizado', 'inox': 'inoxidable', 'alu': 'aluminio',
+    'bco': 'blanco', 'ngo': 'negro', 'rjo': 'rojo', 'azl': 'azul', 'vde': 'verde',
+}
+SINONIMOS_INVERSO = SINONIMOS_BASICO.copy()
+
 def serialize_doc(doc):
     if doc and "_id" in doc:
         doc["_id"] = str(doc["_id"])
@@ -179,31 +190,14 @@ def count_productos():
 
 @app.get("/api/productos/buscar")
 def buscar_productos(q: str, limit: int = 200):
-    """Búsqueda inteligente de productos - funciona con palabras en desorden y variaciones"""
+    """Búsqueda simple de productos por nombre - regex case insensitive"""
     if not q or len(q.strip()) == 0:
         return []
     
-    # Normalizar query
-    query_norm = normalizar_texto(q)
-    palabras_query = query_norm.split()
-    
-    # Quitar palabras muy cortas y stopwords, pero mantener números
-    stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
-    palabras_query = [p for p in palabras_query if (len(p) > 1 or p.isdigit()) and p not in stopwords]
-    
-    if not palabras_query:
-        # Si no hay palabras válidas, usar regex simple
-        regex = {"$regex": q, "$options": "i"}
-        productos = list(productos_col.find({"nombre": regex}).limit(limit))
-        return [serialize_doc(p) for p in productos]
-    
-    # Expandir sinónimos en la búsqueda
-    palabras_expandidas = []
-    for p in palabras_query:
-        palabras_expandidas.append(p)
-        # Agregar sinónimos conocidos
-        if p in SINONIMOS_INVERSO:
-            palabras_expandidas.append(SINONIMOS_INVERSO[p])
+    # Búsqueda simple con regex
+    regex = {"$regex": q, "$options": "i"}
+    productos = list(productos_col.find({"nombre": regex}).limit(limit))
+    return [serialize_doc(p) for p in productos]
     
     # 1. Buscar si hay una corrección directa o alias para la query completa
     aprendizaje = buscar_aprendizaje(q)
