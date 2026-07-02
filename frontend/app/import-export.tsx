@@ -21,6 +21,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { productosApi, calculosApi, flujosApi } from '../services/api';
+import { smartSearch } from '../services/smartSearch';
 
 export default function ImportExportScreen() {
   const [loading, setLoading] = useState(false);
@@ -422,6 +423,10 @@ export default function ImportExportScreen() {
           }
         } catch { errores++; }
       }
+
+      // Invalidar cache de smartSearch y volver a inicializar
+      smartSearch.invalidarCache();
+      await smartSearch.inicializar(true);
 
       setProgress(1);
       setImportResults({ nuevos, actualizados, sinCambios, errores });

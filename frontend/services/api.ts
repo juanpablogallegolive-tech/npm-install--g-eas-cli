@@ -24,6 +24,8 @@ export const productosApi = {
   create: (data: Omit<Producto, '_id'>) => api.post<Producto>('/productos', data),
   update: (id: string, data: Partial<Producto>) => api.put(`/productos/${id}`, data),
   delete: (id: string) => api.delete(`/productos/${id}`),
+  deleteAll: () => api.delete('/productos'),
+  deleteMultiple: (ids: string[]) => api.post('/productos/eliminar-multiples', { ids }),
 };
 
 // Flujos

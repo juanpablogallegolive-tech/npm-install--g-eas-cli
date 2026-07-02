@@ -21,10 +21,12 @@ import {
   ActivityIndicator,
   Divider,
   Chip,
+  Checkbox,
 } from 'react-native-paper';
 import { productosApi } from '../services/api';
 import { Producto } from '../types/types';
 import { useDebounceValue } from '../hooks/useDebounce';
+import { smartSearch } from '../services/smartSearch';
 
 export default function ProductsScreen() {
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -33,6 +35,10 @@ export default function ProductsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [totalProductos, setTotalProductos] = useState(0);
+  
+  // Selection states
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   
   // Modal states
   const [modalVisible, setModalVisible] = useState(false);
@@ -141,6 +147,10 @@ export default function ProductsScreen() {
         Alert.alert('Éxito', 'Producto creado');
       }
 
+      // Invalidar cache y recargar smartSearch
+      smartSearch.invalidarCache();
+      await smartSearch.inicializar(true);
+
       setModalVisible(false);
       loadProductos();
     } catch (error) {
@@ -173,6 +183,11 @@ export default function ProductsScreen() {
   const handleDelete = async (producto: Producto) => {
     try {
       await productosApi.delete(producto._id);
+      
+      // Invalidar cache y recargar smartSearch
+      smartSearch.invalidarCache();
+      await smartSearch.inicializar(true);
+
       Alert.alert('Éxito', 'Producto eliminado');
       loadProductos();
     } catch (error) {
@@ -184,18 +199,174 @@ export default function ProductsScreen() {
     return '$' + price.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
+  // ----- Borrado Completo y Selección Múltiple -----
+  const cancelSelection = () => {
+    setSelectedIds(new Set());
+    setIsSelectionMode(false);
+  };
+
+  const toggleSelectProduct = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      if (next.size === 0) {
+        setIsSelectionMode(false);
+      }
+      return next;
+    });
+  };
+
+  const handleLongPressProduct = (id: string) => {
+    setIsSelectionMode(true);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
+  const handleBorrarTodo = () => {
+    if (Platform.OS === 'web') {
+      const confirm1 = window.confirm('¿Desea borrar todos los productos?');
+      if (confirm1) {
+        const confirm2 = window.confirm('Esta acción eliminará permanentemente todos los productos del catálogo. No podrá deshacerse. ¿Está completamente seguro?');
+        if (confirm2) {
+          ejecutarBorrarTodo();
+        }
+      }
+    } else {
+      Alert.alert(
+        '⚠️ ¿Borrar TODOS los productos?',
+        'Esta acción eliminará de forma permanente todos los productos de la base de datos. No se puede deshacer.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Continuar',
+            style: 'destructive',
+            onPress: () => {
+              Alert.alert(
+                '🚨 Confirmación Final',
+                '¿Estás ABSOLUTAMENTE seguro de borrar la base de datos? Se eliminarán todos los productos en todos los dispositivos.',
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  {
+                    text: 'Confirmar Borrado',
+                    style: 'destructive',
+                    onPress: ejecutarBorrarTodo,
+                  },
+                ]
+              );
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  const ejecutarBorrarTodo = async () => {
+    try {
+      setLoading(true);
+      await productosApi.deleteAll();
+      
+      smartSearch.invalidarCache();
+      await smartSearch.inicializar(true);
+
+      Alert.alert('Éxito', 'Todos los productos han sido eliminados.');
+      setProductos([]);
+      setFilteredProductos([]);
+      setTotalProductos(0);
+      cancelSelection();
+    } catch (error) {
+      console.error('Error al borrar todos los productos:', error);
+      Alert.alert('Error', 'No se pudieron borrar los productos.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    
+    if (Platform.OS === 'web') {
+      const confirmDelete = window.confirm(`¿Desea eliminar los ${selectedIds.size} productos seleccionados?`);
+      if (confirmDelete) {
+        ejecutarBorrarSeleccionados();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Eliminación',
+        `¿Desea eliminar los ${selectedIds.size} productos seleccionados?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Eliminar',
+            style: 'destructive',
+            onPress: ejecutarBorrarSeleccionados,
+          },
+        ]
+      );
+    }
+  };
+
+  const ejecutarBorrarSeleccionados = async () => {
+    try {
+      setLoading(true);
+      const idsArray = Array.from(selectedIds);
+      await productosApi.deleteMultiple(idsArray);
+      
+      smartSearch.invalidarCache();
+      await smartSearch.inicializar(true);
+
+      Alert.alert('Éxito', 'Productos eliminados');
+      cancelSelection();
+      loadProductos();
+    } catch (error) {
+      console.error('Error al borrar productos seleccionados:', error);
+      Alert.alert('Error', 'No se pudieron eliminar los productos seleccionados');
+    } finally {
+      setLoading(false);
+    }
+  };
+  // -------------------------------------------------
+
   // ⚡ Perf: memoizar renderProduct con useCallback para evitar re-creación en cada render
   const renderProduct = useCallback(({ item, index }: { item: Producto; index: number }) => {
+    const isSelected = selectedIds.has(item._id);
     const hasUpdate = item.comentarios?.includes('[Precio actualizado') || 
                       item.comentarios?.includes('[Actualizado desde Excel');
     
     return (
-      <Card style={styles.productCard}>
+      <Card style={[styles.productCard, isSelected && styles.selectedProductCard]}>
         <TouchableOpacity 
-          onPress={() => openEditProduct(item)}
+          onPress={() => {
+            if (isSelectionMode) {
+              toggleSelectProduct(item._id);
+            } else {
+              openEditProduct(item);
+            }
+          }}
+          onLongPress={() => {
+            if (!isSelectionMode) {
+              handleLongPressProduct(item._id);
+            }
+          }}
+          delayLongPress={300}
           activeOpacity={0.7}
         >
           <Card.Content style={styles.cardContent}>
+            {isSelectionMode && (
+              <View style={styles.checkboxContainer}>
+                <Checkbox.Android
+                  status={isSelected ? 'checked' : 'unchecked'}
+                  onPress={() => toggleSelectProduct(item._id)}
+                  color="#6200ee"
+                />
+              </View>
+            )}
             <View style={styles.productMain}>
               <View style={styles.indexBadge}>
                 <Text style={styles.indexText}>{index + 1}</Text>
@@ -228,57 +399,79 @@ export default function ProductsScreen() {
                 )}
               </View>
             </View>
-            <View style={styles.productActions}>
-              <IconButton
-                icon="pencil"
-                size={22}
-                iconColor="#6200ee"
-                onPress={() => openEditProduct(item)}
-                style={styles.actionBtn}
-              />
-              <IconButton
-                icon="delete"
-                size={22}
-                iconColor="#d32f2f"
-                onPress={() => deleteProduct(item)}
-                style={styles.actionBtn}
-              />
-            </View>
+            {!isSelectionMode && (
+              <View style={styles.productActions}>
+                <IconButton
+                  icon="pencil"
+                  size={22}
+                  iconColor="#6200ee"
+                  onPress={() => openEditProduct(item)}
+                  style={styles.actionBtn}
+                />
+                <IconButton
+                  icon="delete"
+                  size={22}
+                  iconColor="#d32f2f"
+                  onPress={() => deleteProduct(item)}
+                  style={styles.actionBtn}
+                />
+              </View>
+            )}
           </Card.Content>
         </TouchableOpacity>
       </Card>
     );
-  }, []);
+  }, [selectedIds, isSelectionMode]);
 
   return (
     <View style={styles.container}>
-      {/* Header con búsqueda */}
-      <View style={styles.header}>
-        <Searchbar
-          placeholder="Buscar producto..."
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          style={styles.searchbar}
-          inputStyle={styles.searchInput}
-        />
-        <View style={styles.statsRow}>
-          <Chip mode="outlined" style={styles.statChip}>
-            Total: {totalProductos}
-          </Chip>
-          <Chip mode="outlined" style={styles.statChip}>
-            Mostrando: {filteredProductos.length}
-          </Chip>
-          <IconButton
-            icon="refresh"
-            size={20}
-            onPress={loadProductos}
-            disabled={loading}
-          />
+      {/* Header con búsqueda o barra de selección */}
+      {isSelectionMode ? (
+        <View style={styles.selectionHeader}>
+          <View style={styles.selectionInfo}>
+            <IconButton icon="close" size={24} iconColor="#6200ee" onPress={cancelSelection} />
+            <Text style={styles.selectionTitle}>{selectedIds.size} seleccionados</Text>
+          </View>
+          <Button mode="text" textColor="#d32f2f" icon="delete" onPress={handleDeleteSelected}>
+            Eliminar
+          </Button>
         </View>
-      </View>
+      ) : (
+        <View style={styles.header}>
+          <Searchbar
+            placeholder="Buscar producto..."
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            style={styles.searchbar}
+            inputStyle={styles.searchInput}
+          />
+          <View style={styles.statsRow}>
+            <Chip mode="outlined" style={styles.statChip}>
+              Total: {totalProductos}
+            </Chip>
+            <Chip mode="outlined" style={styles.statChip}>
+              Mostrando: {filteredProductos.length}
+            </Chip>
+            <IconButton
+              icon="refresh"
+              size={20}
+              onPress={loadProductos}
+              disabled={loading}
+            />
+            <IconButton
+              icon="trash-can"
+              size={20}
+              iconColor="#d32f2f"
+              onPress={handleBorrarTodo}
+              disabled={loading}
+              style={{ marginLeft: -4 }}
+            />
+          </View>
+        </View>
+      )}
 
       {/* Lista de productos */}
-      {loading && !refreshing ? (
+      {loading && !refreshing && productos.length === 0 ? (
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#6200ee" />
           <Text style={styles.loadingText}>Cargando productos...</Text>
@@ -624,5 +817,39 @@ const styles = StyleSheet.create({
   },
   saveButtonContent: {
     paddingVertical: 6,
+  },
+  selectedProductCard: {
+    backgroundColor: '#f1e6ff',
+    borderColor: '#6200ee',
+    borderWidth: 1,
+  },
+  checkboxContainer: {
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  selectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  selectionInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  selectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#6200ee',
+    marginLeft: 8,
   },
 });

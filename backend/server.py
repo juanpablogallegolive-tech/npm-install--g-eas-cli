@@ -166,10 +166,10 @@ def aplicar_operacion(precio_base: float, operacion: dict, valor: float) -> floa
 
 @app.get("/api/productos")
 def get_productos(skip: int = 0, limit: int = 0):
-    # Si limit es 0, obtener todos los productos con un límite máximo razonable
-    if limit == 0:
-        limit = 5000  # Límite máximo para evitar timeout en producción
-    productos = list(productos_col.find().skip(skip).limit(limit))
+    query = productos_col.find().skip(skip)
+    if limit > 0:
+        query = query.limit(limit)
+    productos = list(query)
     return [serialize_doc(p) for p in productos]
 
 @app.get("/api/productos/count")
@@ -222,7 +222,7 @@ def buscar_productos(q: str, limit: int = 200):
             print(f"Error cargando producto aprendido: {e}")
 
     # Obtener productos para búsqueda inteligente
-    productos = list(productos_col.find().limit(5000))
+    productos = list(productos_col.find())
     
     # Determinar el "sujeto" principal de la búsqueda (el objeto central, e.g. "arandela", "tubo")
     # Es la primera palabra que no sea un número ni una unidad ni una MARCA
@@ -1296,7 +1296,7 @@ def eliminar_aprendizaje(id: str):
 def match_productos(request: MatchRequest):
     """Busca productos similares para cada nombre dado - SIEMPRE devuelve resultados"""
     try:
-        productos = list(productos_col.find({}, {"nombre": 1, "costo": 1, "precio_venta": 1}).limit(5000))
+        productos = list(productos_col.find({}, {"nombre": 1, "costo": 1, "precio_venta": 1}))
         
         if not productos:
             return [{
@@ -1488,6 +1488,41 @@ def match_productos(request: MatchRequest):
             "sospechoso": True,
             "aprendido": False
         } for nombre in request.nombres]
+
+class BorrarMultiplesRequest(BaseModel):
+    ids: List[str]
+
+@app.delete("/api/productos")
+def eliminar_todos_los_productos():
+    """Elimina todos los productos del catálogo"""
+    try:
+        result = productos_col.delete_many({})
+        return {
+            "status": "success",
+            "cantidad_eliminada": result.deleted_count,
+            "message": f"Se eliminaron {result.deleted_count} productos correctamente."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al eliminar productos: {str(e)}")
+
+@app.post("/api/productos/eliminar-multiples")
+def eliminar_multiples_productos(request: BorrarMultiplesRequest):
+    """Elimina múltiples productos basados en una lista de IDs"""
+    try:
+        object_ids = [ObjectId(id_str) for id_str in request.ids if ObjectId.is_valid(id_str)]
+        if not object_ids:
+            raise HTTPException(status_code=400, detail="No se proporcionaron IDs válidos")
+        
+        result = productos_col.delete_many({"_id": {"$in": object_ids}})
+        return {
+            "status": "success",
+            "cantidad_eliminada": result.deleted_count,
+            "message": f"Se eliminaron {result.deleted_count} productos correctamente."
+        }
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Error al eliminar múltiples productos: {str(e)}")
 
 @app.get("/api/health")
 def health_check():

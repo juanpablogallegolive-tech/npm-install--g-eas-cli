@@ -25,6 +25,7 @@ import { productosApi, calcularPrecio, calculosApi } from '../services/api';
 import { Producto, Flujo, Cliente, Calculo } from '../types/types';
 import { useStore } from '../store/store';
 import { useDebouncedCallback } from '../hooks/useDebounce';
+import { smartSearch } from '../services/smartSearch';
 
 export default function CalculatorScreen() {
   // ⚡ Perf: selectores específicos para evitar re-renders innecesarios
@@ -302,6 +303,10 @@ export default function CalculatorScreen() {
         costo_base: costoBase,
         precio_calculado: precioCalculado, // Guardar el precio calculado
       });
+
+      // Invalidar cache de smartSearch para refrescar costo base y precio de venta
+      smartSearch.invalidarCache();
+      await smartSearch.inicializar(true);
 
       Alert.alert('Éxito', 'Cálculo guardado en el historial');
       limpiarFormulario();
