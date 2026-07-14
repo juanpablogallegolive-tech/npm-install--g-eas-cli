@@ -149,7 +149,7 @@ export default function QuotesScreen() {
     const cantidadNormalizada = cantidad.replace(',', '.');
     newItems[index].cantidad = cantidad;
     const cant = parseFloat(cantidadNormalizada) || 0;
-    const precio = newItems[index].producto?.precio_venta || newItems[index].producto?.costo || 0;
+    const precio = newItems[index].producto?.costo || 0;
     newItems[index].subtotal = cant * precio;
     setItems(newItems);
   };
@@ -158,7 +158,7 @@ export default function QuotesScreen() {
     const newItems = [...items];
     newItems[index].producto = producto;
     const cant = parseFloat(newItems[index].cantidad) || 0;
-    newItems[index].subtotal = cant * (producto.precio_venta || producto.costo || 0);
+    newItems[index].subtotal = cant * (producto.costo || 0);
     setItems(newItems);
     setShowResults(false);
     setSearchQuery('');
@@ -182,7 +182,7 @@ export default function QuotesScreen() {
     const nuevosItems = productosLector.map(p => ({
       cantidad: p.cantidad.toString(),
       producto: p.producto,
-      subtotal: p.cantidad * (p.producto.precio_venta || p.producto.costo || 0),
+      subtotal: p.cantidad * (p.producto.costo || 0),
     }));
     setItems([...items, ...nuevosItems]);
   };
@@ -209,7 +209,7 @@ export default function QuotesScreen() {
         cantidad: parseFloat(item.cantidad) || 0,
         producto_id: item.producto!._id,
         nombre_producto: item.producto!.nombre,
-        precio_unitario: item.producto!.precio_venta || item.producto!.costo || 0,
+        precio_unitario: item.producto!.costo || 0,
         subtotal: item.subtotal,
       }));
 
@@ -645,7 +645,7 @@ export default function QuotesScreen() {
                           style={styles.resultItem}
                         >
                           <Text style={styles.resultTitle} numberOfLines={2}>{producto.nombre}</Text>
-                          <Text style={styles.resultPrice}>${(producto.precio_venta || producto.costo || 0).toLocaleString()}</Text>
+                          <Text style={styles.resultPrice}>${(producto.costo || 0).toLocaleString()}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
