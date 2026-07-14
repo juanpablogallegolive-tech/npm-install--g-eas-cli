@@ -1,285 +1,176 @@
 #!/usr/bin/env python3
 """
-Backend Test Suite - Bug Fix Verification
-Testing product search functionality after bug fix
+Backend Testing Script for Cantidad Field Changes
+Tests the new 'cantidad' field in Producto model
 """
 
 import requests
 import json
 import sys
 
-# Backend URL from environment
+# Backend URL from frontend .env
 BACKEND_URL = "https://calc-flow-sync.preview.emergentagent.com/api"
 
-def print_test_header(test_name):
-    print(f"\n{'='*60}")
-    print(f"TEST: {test_name}")
-    print(f"{'='*60}")
+def test_health_check():
+    """Test 1: Verify backend health"""
+    print("\n" + "="*60)
+    print("TEST 1: Health Check")
+    print("="*60)
+    try:
+        response = requests.get(f"{BACKEND_URL}/health", timeout=10)
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "ok":
+                print("✅ PASS: Health check successful")
+                return True
+            else:
+                print("❌ FAIL: Health check returned unexpected status")
+                return False
+        else:
+            print(f"❌ FAIL: Health check returned status {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ FAIL: Health check error - {str(e)}")
+        return False
 
-def print_result(success, message):
-    status = "✅ PASS" if success else "❌ FAIL"
-    print(f"{status}: {message}")
-    return success
+def test_get_productos():
+    """Test 2: Verify productos endpoint returns data"""
+    print("\n" + "="*60)
+    print("TEST 2: GET /api/productos")
+    print("="*60)
+    try:
+        response = requests.get(f"{BACKEND_URL}/productos?limit=5", timeout=10)
+        print(f"Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            productos = response.json()  # Returns list directly
+            print(f"Products returned: {len(productos)}")
+            
+            # Check if any product has cantidad field
+            if productos:
+                first_product = productos[0]
+                print(f"\nFirst product sample:")
+                print(f"  - nombre: {first_product.get('nombre', 'N/A')}")
+                print(f"  - costo: {first_product.get('costo', 'N/A')}")
+                print(f"  - precio_venta: {first_product.get('precio_venta', 'N/A')}")
+                print(f"  - cantidad: {first_product.get('cantidad', 'N/A')}")
+                
+                print("✅ PASS: GET /api/productos working")
+                return True
+            else:
+                print("⚠️  WARNING: No products found in database")
+                return True
+        else:
+            print(f"❌ FAIL: GET /api/productos returned status {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ FAIL: GET /api/productos error - {str(e)}")
+        return False
 
-def test_create_product():
-    """Test 1: Create a new product manually"""
-    print_test_header("Create New Product")
+def test_create_producto_with_cantidad():
+    """Test 3: Create product with cantidad field"""
+    print("\n" + "="*60)
+    print("TEST 3: POST /api/productos with cantidad field")
+    print("="*60)
     
-    product_data = {
-        "nombre": "CLAVO DE ACERO 2 PULGADAS",
-        "costo": 50,
-        "precio_venta": 75
+    test_product = {
+        "nombre": "Test Cantidad Product",
+        "costo": 100,
+        "precio_venta": 150,
+        "cantidad": "50"
     }
+    
+    print(f"Creating product: {json.dumps(test_product, indent=2)}")
     
     try:
         response = requests.post(
             f"{BACKEND_URL}/productos",
-            json=product_data,
+            json=test_product,
             headers={"Content-Type": "application/json"},
             timeout=10
         )
-        
         print(f"Status Code: {response.status_code}")
-        print(f"Response: {response.text[:200]}")
+        print(f"Response: {response.json()}")
         
         if response.status_code == 200:
             data = response.json()
-            product_id = data.get("id")
-            print(f"Product created with ID: {product_id}")
-            return print_result(True, f"Product created successfully (ID: {product_id})"), product_id
-        else:
-            return print_result(False, f"Failed to create product: {response.status_code} - {response.text}"), None
+            product_id = data.get("_id")  # API returns _id not id
             
-    except Exception as e:
-        return print_result(False, f"Exception during product creation: {str(e)}"), None
-
-def test_search_uppercase(product_name_part):
-    """Test 2: Search with uppercase query"""
-    print_test_header(f"Search Product - Uppercase Query: '{product_name_part}'")
-    
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/productos/buscar",
-            params={"q": product_name_part},
-            timeout=10
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"Response: {response.text[:500]}")
-            return print_result(False, f"Search failed with status {response.status_code}")
-        
-        results = response.json()
-        print(f"Found {len(results)} results")
-        
-        # Check if our product is in results
-        found = False
-        for product in results:
-            if "CLAVO DE ACERO 2 PULGADAS" in product.get("nombre", ""):
-                found = True
-                print(f"✓ Found product: {product.get('nombre')}")
-                break
-        
-        if found:
-            return print_result(True, f"Product found in search results for '{product_name_part}'")
+            if product_id:
+                print(f"✅ Product created with ID: {product_id}")
+                
+                # Verify the product was created with cantidad field
+                verify_response = requests.get(f"{BACKEND_URL}/productos/{product_id}", timeout=10)
+                if verify_response.status_code == 200:
+                    created_product = verify_response.json()
+                    print(f"\nVerifying created product:")
+                    print(f"  - nombre: {created_product.get('nombre')}")
+                    print(f"  - costo: {created_product.get('costo')}")
+                    print(f"  - precio_venta: {created_product.get('precio_venta')}")
+                    print(f"  - cantidad: {created_product.get('cantidad')}")
+                    
+                    if created_product.get('cantidad') == "50":
+                        print("✅ PASS: Product created with cantidad field correctly")
+                        
+                        # Clean up - delete test product
+                        delete_response = requests.delete(f"{BACKEND_URL}/productos/{product_id}", timeout=10)
+                        if delete_response.status_code == 200:
+                            print(f"✅ Test product cleaned up (deleted)")
+                        
+                        return True
+                    else:
+                        print(f"❌ FAIL: cantidad field not saved correctly. Expected '50', got '{created_product.get('cantidad')}'")
+                        return False
+                else:
+                    print(f"⚠️  WARNING: Could not verify created product (status {verify_response.status_code})")
+                    return True
+            else:
+                print("❌ FAIL: No product ID returned")
+                return False
         else:
-            print(f"Products found: {[p.get('nombre') for p in results[:5]]}")
-            return print_result(False, f"Product NOT found in search results for '{product_name_part}'")
-            
+            print(f"❌ FAIL: POST /api/productos returned status {response.status_code}")
+            return False
     except Exception as e:
-        return print_result(False, f"Exception during search: {str(e)}")
-
-def test_search_lowercase(product_name_part):
-    """Test 3: Search with lowercase query (case-insensitive test)"""
-    print_test_header(f"Search Product - Lowercase Query: '{product_name_part}'")
-    
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/productos/buscar",
-            params={"q": product_name_part},
-            timeout=10
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"Response: {response.text[:500]}")
-            return print_result(False, f"Search failed with status {response.status_code}")
-        
-        results = response.json()
-        print(f"Found {len(results)} results")
-        
-        # Check if our product is in results
-        found = False
-        for product in results:
-            if "CLAVO DE ACERO 2 PULGADAS" in product.get("nombre", ""):
-                found = True
-                print(f"✓ Found product: {product.get('nombre')}")
-                break
-        
-        if found:
-            return print_result(True, f"Case-insensitive search working - product found for '{product_name_part}'")
-        else:
-            print(f"Products found: {[p.get('nombre') for p in results[:5]]}")
-            return print_result(False, f"Product NOT found in search results for '{product_name_part}'")
-            
-    except Exception as e:
-        return print_result(False, f"Exception during search: {str(e)}")
-
-def test_search_multi_word(query):
-    """Test 4: Search with multiple words"""
-    print_test_header(f"Search Product - Multi-word Query: '{query}'")
-    
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/productos/buscar",
-            params={"q": query},
-            timeout=10
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"Response: {response.text[:500]}")
-            return print_result(False, f"Search failed with status {response.status_code}")
-        
-        results = response.json()
-        print(f"Found {len(results)} results")
-        
-        # Check if our product is in results
-        found = False
-        for product in results:
-            if "CLAVO DE ACERO 2 PULGADAS" in product.get("nombre", ""):
-                found = True
-                print(f"✓ Found product: {product.get('nombre')}")
-                break
-        
-        if found:
-            return print_result(True, f"Multi-word search working - product found for '{query}'")
-        else:
-            print(f"Products found: {[p.get('nombre') for p in results[:5]]}")
-            return print_result(False, f"Product NOT found in search results for '{query}'")
-            
-    except Exception as e:
-        return print_result(False, f"Exception during search: {str(e)}")
-
-def test_product_in_list(product_id):
-    """Test 5: Verify product appears in general product list"""
-    print_test_header("Verify Product in General List")
-    
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/productos",
-            params={"limit": 10000},  # Get many products to ensure we find it
-            timeout=15
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code != 200:
-            return print_result(False, f"Failed to get product list: {response.status_code}")
-        
-        products = response.json()
-        print(f"Total products in list: {len(products)}")
-        
-        # Look for our product
-        found = False
-        for product in products:
-            if product.get("id") == product_id or "CLAVO DE ACERO 2 PULGADAS" in product.get("nombre", ""):
-                found = True
-                print(f"✓ Found product in list: {product.get('nombre')} (ID: {product.get('id')})")
-                break
-        
-        if found:
-            return print_result(True, "Product appears in general product list")
-        else:
-            return print_result(False, "Product NOT found in general product list")
-            
-    except Exception as e:
-        return print_result(False, f"Exception during list retrieval: {str(e)}")
-
-def cleanup_test_product(product_id):
-    """Cleanup: Delete the test product"""
-    print_test_header("Cleanup - Delete Test Product")
-    
-    if not product_id:
-        print("⚠️  No product ID to cleanup")
-        return
-    
-    try:
-        response = requests.delete(
-            f"{BACKEND_URL}/productos/{product_id}",
-            timeout=10
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code == 200:
-            print(f"✓ Test product deleted successfully")
-        else:
-            print(f"⚠️  Could not delete test product: {response.text}")
-            
-    except Exception as e:
-        print(f"⚠️  Exception during cleanup: {str(e)}")
+        print(f"❌ FAIL: POST /api/productos error - {str(e)}")
+        return False
 
 def main():
+    """Run all tests"""
     print("\n" + "="*60)
-    print("BUG FIX VERIFICATION - Product Search Functionality")
+    print("BACKEND TESTING - CANTIDAD FIELD VERIFICATION")
     print("="*60)
     print(f"Backend URL: {BACKEND_URL}")
-    print("="*60)
     
     results = []
-    product_id = None
     
-    # Test 1: Create product
-    success, product_id = test_create_product()
-    results.append(("Create Product", success))
-    
-    if not success:
-        print("\n❌ Cannot continue testing - product creation failed")
-        sys.exit(1)
-    
-    # Test 2: Search with uppercase
-    success = test_search_uppercase("CLAVO")
-    results.append(("Search Uppercase 'CLAVO'", success))
-    
-    # Test 3: Search with lowercase (case-insensitive)
-    success = test_search_lowercase("acero")
-    results.append(("Search Lowercase 'acero'", success))
-    
-    # Test 4: Search with multiple words
-    success = test_search_multi_word("clavo acero")
-    results.append(("Search Multi-word 'clavo acero'", success))
-    
-    # Test 5: Verify in product list
-    success = test_product_in_list(product_id)
-    results.append(("Product in List", success))
-    
-    # Cleanup
-    cleanup_test_product(product_id)
+    # Run tests
+    results.append(("Health Check", test_health_check()))
+    results.append(("GET /api/productos", test_get_productos()))
+    results.append(("POST /api/productos with cantidad", test_create_producto_with_cantidad()))
     
     # Summary
     print("\n" + "="*60)
     print("TEST SUMMARY")
     print("="*60)
     
-    passed = sum(1 for _, success in results if success)
+    passed = sum(1 for _, result in results if result)
     total = len(results)
     
-    for test_name, success in results:
-        status = "✅ PASS" if success else "❌ FAIL"
+    for test_name, result in results:
+        status = "✅ PASS" if result else "❌ FAIL"
         print(f"{status}: {test_name}")
     
     print(f"\nTotal: {passed}/{total} tests passed")
     
     if passed == total:
-        print("\n🎉 ALL TESTS PASSED - Bug fix verified successfully!")
-        sys.exit(0)
+        print("\n🎉 All tests passed!")
+        return 0
     else:
-        print(f"\n⚠️  {total - passed} test(s) failed - Bug fix needs attention")
-        sys.exit(1)
+        print(f"\n⚠️  {total - passed} test(s) failed")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

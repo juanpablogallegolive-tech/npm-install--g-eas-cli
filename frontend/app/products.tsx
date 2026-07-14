@@ -46,6 +46,7 @@ export default function ProductsScreen() {
   const [nombre, setNombre] = useState('');
   const [costo, setCosto] = useState('');
   const [precioVenta, setPrecioVenta] = useState('');
+  const [cantidad, setCantidad] = useState('');
   const [comentarios, setComentarios] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -96,6 +97,7 @@ export default function ProductsScreen() {
     setNombre('');
     setCosto('');
     setPrecioVenta('');
+    setCantidad('');
     setComentarios('');
     setModalVisible(true);
   };
@@ -105,6 +107,7 @@ export default function ProductsScreen() {
     setNombre(producto.nombre);
     setCosto((producto.costo || 0).toString());
     setPrecioVenta((producto.precio_venta || 0).toString());
+    setCantidad((producto.cantidad || '').toString());
     setComentarios(producto.comentarios || '');
     setModalVisible(true);
   };
@@ -134,6 +137,7 @@ export default function ProductsScreen() {
           nombre: nombre.trim(),
           costo: costoVal,
           precio_venta: precioVentaVal,
+          cantidad: cantidad,
           comentarios: nuevoComentario,
         });
         Alert.alert('Éxito', 'Producto actualizado');
@@ -142,6 +146,7 @@ export default function ProductsScreen() {
           nombre: nombre.trim(),
           costo: costoVal,
           precio_venta: precioVentaVal,
+          cantidad: cantidad,
           comentarios,
         });
         Alert.alert('Éxito', 'Producto creado');
@@ -573,6 +578,17 @@ export default function ProductsScreen() {
                   activeOutlineColor="#6200ee"
                 />
               </View>
+
+              <TextInput
+                mode="outlined"
+                label="Cantidad en Stock"
+                value={cantidad}
+                onChangeText={setCantidad}
+                keyboardType="numeric"
+                style={styles.input}
+                outlineColor="#ccc"
+                activeOutlineColor="#6200ee"
+              />
               
               <TextInput
                 mode="outlined"

@@ -72,6 +72,7 @@ class Producto(BaseModel):
     nombre: str
     costo: float = 0           # Costo del producto
     precio_venta: float = 0    # Precio de venta al público
+    cantidad: Optional[str] = ""  # Cantidad en stock
     flujo_id: Optional[str] = None
     comentarios: Optional[str] = ""
     fecha_creacion: Optional[datetime] = None

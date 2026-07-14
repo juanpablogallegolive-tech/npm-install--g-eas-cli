@@ -21,8 +21,8 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native-paper';
-import { cotizacionesApi, calculosApi } from '../services/api';
-import { Cotizacion, ItemCotizacion, Calculo } from '../types/types';
+import { cotizacionesApi, calculosApi, productosApi } from '../services/api';
+import { Cotizacion, ItemCotizacion, Calculo, Producto } from '../types/types';
 import { format } from 'date-fns';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -38,11 +38,12 @@ interface ClienteConPrecio {
 }
 
 export default function QuoteClientScreen() {
-  const [clienteSeleccionado, setClienteSeleccionado] = useState<string>('');
-  const [searchCliente, setSearchCliente] = useState('');
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<string>('Cliente General');
+  const [searchCliente, setSearchCliente] = useState('Cliente General');
   const [showClienteResults, setShowClienteResults] = useState(false);
-  const [clientesDisponibles, setClientesDisponibles] = useState<string[]>([]);
+  const [clientesDisponibles, setClientesDisponibles] = useState<string[]>(['Cliente General']);
   const [preciosPorCliente, setPreciosPorCliente] = useState<ClienteConPrecio[]>([]);
+  const [productosGenerales, setProductosGenerales] = useState<Producto[]>([]);
   
   const [items, setItems] = useState<Array<{
     cantidad: string;
@@ -65,12 +66,22 @@ export default function QuoteClientScreen() {
 
   useEffect(() => {
     cargarDatosClientes();
+    cargarProductosGenerales();
     loadCotizaciones();
   }, []);
 
   useEffect(() => {
     calcularTotal();
   }, [items]);
+
+  const cargarProductosGenerales = async () => {
+    try {
+      const response = await productosApi.getAll();
+      setProductosGenerales(response.data);
+    } catch (error) {
+      console.error('Error cargando productos:', error);
+    }
+  };
 
   const cargarDatosClientes = async () => {
     try {
@@ -98,7 +109,7 @@ export default function QuoteClientScreen() {
         }
       });
       
-      setClientesDisponibles(Array.from(clientesSet).sort());
+      setClientesDisponibles(['Cliente General', ...Array.from(clientesSet).sort()]);
       setPreciosPorCliente(precios);
     } catch (error) {
       console.error('Error cargando clientes:', error);
@@ -125,8 +136,18 @@ export default function QuoteClientScreen() {
 
   const productosDelCliente = useMemo(() => {
     if (!clienteSeleccionado) return [];
+    if (clienteSeleccionado === 'Cliente General') {
+      // Para Cliente General, usar precio_venta de todos los productos
+      return productosGenerales.map(p => ({
+        nombre: 'Cliente General',
+        producto: p.nombre,
+        precio_final: p.precio_venta || 0,
+        porcentaje_ganancia: 0,
+        costo: p.costo || 0,
+      }));
+    }
     return preciosPorCliente.filter(p => p.nombre === clienteSeleccionado);
-  }, [clienteSeleccionado, preciosPorCliente]);
+  }, [clienteSeleccionado, preciosPorCliente, productosGenerales]);
 
   const productosFiltrados = useMemo(() => {
     if (!searchQuery) return productosDelCliente.slice(0, 50);

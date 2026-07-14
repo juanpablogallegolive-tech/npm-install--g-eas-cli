@@ -3,6 +3,7 @@ export interface Producto {
   nombre: string;
   costo: number;           // Costo del producto
   precio_venta: number;    // Precio de venta al público
+  cantidad?: string;       // Cantidad en stock
   flujo_id?: string;
   comentarios?: string;
   fecha_creacion?: string;

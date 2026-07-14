@@ -252,6 +252,18 @@ backend:
           agent: "testing"
           comment: "✅ POST /api/productos/eliminar-multiples endpoint working correctly (lines 1508-1525). Successfully tested bulk deletion of 2 products. Endpoint accepts list of IDs, validates ObjectIds, and deletes multiple products in single operation. Returns success status with count of deleted products. Verified deleted products return 404 on subsequent GET requests."
 
+  - task: "Cantidad Field in Producto Model"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Cantidad field successfully added to Producto model (line 75: cantidad: Optional[str] = ''). Tested with 3 comprehensive tests: (1) Health check - backend responding correctly, (2) GET /api/productos - returns products with cantidad field, (3) POST /api/productos with cantidad='50' - product created successfully with cantidad field persisted. Created test product with ID 6a5671377dee93d5cda87925, verified cantidad field saved correctly, and cleaned up test data. All 3/3 tests passed."
+
 frontend:
   - task: "Frontend Testing"
     implemented: false
@@ -268,14 +280,13 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: false
 
 test_plan:
   current_focus:
+    - "Cantidad field in Producto model - COMPLETED"
     - "All backend endpoints tested and working"
-    - "Review request endpoints completed"
-    - "New features from ZIP update tested and working"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -289,3 +300,5 @@ agent_communication:
       message: "Review request testing completed: Tested all 7 requested endpoints. Results: ✅ GET /api/productos (4349 items), ✅ GET /api/flujos (3 items), ✅ GET /api/calculos (0 items), ✅ GET /api/cotizaciones (0 items), ❌ GET /api/clientes (NOT IMPLEMENTED), ✅ POST /api/match-productos (working with product matching), ✅ GET /api/aprendizajes (0 items). 6/7 endpoints working correctly. Only /api/clientes missing from backend implementation."
     - agent: "testing"
       message: "NEW FEATURES TESTING COMPLETED (ZIP Update): All 3 new features tested successfully. ✅ Bug Fix: No 5000 product limit - GET /api/productos accepts custom limit parameter (tested with limit=10000). ✅ DELETE /api/productos endpoint implemented and verified in code (lines 1495-1506). ✅ POST /api/productos/eliminar-multiples endpoint working - successfully deleted 2 test products and verified deletion. All new endpoints functioning correctly. Test success rate: 100% (3/3 tests passed)."
+    - agent: "testing"
+      message: "CANTIDAD FIELD TESTING COMPLETED: Verified new 'cantidad' field in Producto model (backend/server.py line 75). All 3 backend tests passed: ✅ Health check working, ✅ GET /api/productos returns products (3 products found), ✅ POST /api/productos with cantidad='50' successfully creates and persists product with cantidad field. Backend fully functional with new cantidad field. Frontend testing not performed as per guidelines."
