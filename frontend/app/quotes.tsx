@@ -692,8 +692,8 @@ export default function QuotesScreen() {
                 {item.producto && (
                   <View style={[
                     styles.subtotalBox,
-                    item.subtotal > 10000 && { backgroundColor: '#ffcdd2' },
-                    item.subtotal > 7000 && item.subtotal <= 10000 && { backgroundColor: '#fff9c4' },
+                    item.subtotal > 10000000 && { backgroundColor: '#ffcdd2' },
+                    item.subtotal > 7000000 && item.subtotal <= 10000000 && { backgroundColor: '#fff9c4' },
                   ]}>
                     <Text style={styles.subtotalLabel}>Subtotal:</Text>
                     <Text style={styles.subtotalValor}>${item.subtotal.toLocaleString()}</Text>
