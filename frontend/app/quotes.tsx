@@ -178,6 +178,43 @@ export default function QuotesScreen() {
     setEditingCotizacionId(null);
   };
 
+  const recalcularCotizaciones = async () => {
+    try {
+      setLoading(true);
+      const response = await cotizacionesApi.getAll();
+      const todasCotizaciones = response.data;
+      const productosResponse = await productosApi.getAll();
+      const productosMap = new Map(productosResponse.data.map((p: Producto) => [p.nombre.toLowerCase(), p]));
+      
+      let actualizadas = 0;
+      for (const cot of todasCotizaciones) {
+        let cambio = false;
+        const nuevosItems = cot.items.map((item: ItemCotizacion) => {
+          const prod = productosMap.get(item.nombre_producto.toLowerCase());
+          if (prod && prod.costo !== item.precio_unitario) {
+            cambio = true;
+            const nuevoSubtotal = item.cantidad * prod.costo;
+            return { ...item, precio_unitario: prod.costo, subtotal: nuevoSubtotal };
+          }
+          return item;
+        });
+        
+        if (cambio) {
+          const nuevoTotal = nuevosItems.reduce((acc: number, i: ItemCotizacion) => acc + i.subtotal, 0);
+          await cotizacionesApi.update(cot._id, { ...cot, items: nuevosItems, total: nuevoTotal });
+          actualizadas++;
+        }
+      }
+      
+      Alert.alert('Listo', `Se recalcularon ${actualizadas} cotizaciones con los costos actuales`);
+      loadCotizaciones();
+    } catch (error) {
+      Alert.alert('Error', 'No se pudieron recalcular las cotizaciones');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleProductosLector = (productosLector: Array<{ producto: Producto; cantidad: number }>) => {
     const nuevosItems = productosLector.map(p => ({
       cantidad: p.cantidad.toString(),
@@ -653,7 +690,11 @@ export default function QuotesScreen() {
                 )}
 
                 {item.producto && (
-                  <View style={styles.subtotalBox}>
+                  <View style={[
+                    styles.subtotalBox,
+                    item.subtotal > 10000 && { backgroundColor: '#ffcdd2' },
+                    item.subtotal > 7000 && item.subtotal <= 10000 && { backgroundColor: '#fff9c4' },
+                  ]}>
                     <Text style={styles.subtotalLabel}>Subtotal:</Text>
                     <Text style={styles.subtotalValor}>${item.subtotal.toLocaleString()}</Text>
                   </View>
@@ -708,6 +749,10 @@ export default function QuotesScreen() {
               
               <Button mode="outlined" onPress={() => setModalExportVisible(true)} icon="swap-horizontal">
                 Importar / Exportar
+              </Button>
+              
+              <Button mode="outlined" onPress={recalcularCotizaciones} icon="refresh" loading={loading} style={{ marginTop: 8 }}>
+                Recalcular Cotizaciones con Costos
               </Button>
             </View>
 
