@@ -6,6 +6,7 @@ from datetime import datetime
 from pymongo import MongoClient
 from bson import ObjectId
 import os
+from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1289,10 +1290,19 @@ def eliminar_aprendizaje(id: str):
 
 @app.post("/api/match-productos")
 def match_productos(request: MatchRequest):
-    """Busca productos similares para cada nombre dado - SIEMPRE devuelve resultados"""
+    """
+    Busca productos similares para múltiples nombres.
+    - Soporta cualquier cantidad de productos en una sola solicitud.
+    - Usa similitud robusta combinando Levenshtein + n-gramas + coincidencia por tokens.
+    - Reduce costo computacional con índice invertido para evitar comparar contra TODO el catálogo.
+    """
     try:
+        nombres_entrada = request.nombres or []
+        if len(nombres_entrada) == 0:
+            return []
+
+        # Cargar catálogo una sola vez
         productos = list(productos_col.find({}, {"nombre": 1, "costo": 1, "precio_venta": 1}))
-        
         if not productos:
             return [{
                 "nombre_original": nombre,
@@ -1300,41 +1310,184 @@ def match_productos(request: MatchRequest):
                 "score": 0,
                 "sospechoso": True,
                 "aprendido": False
-            } for nombre in request.nombres]
-            
-        # PRE-PROCESAMIENTO DE PRODUCTOS PARA MÁXIMA EFICIENCIA
-        # Evita ejecutar normalizar_texto (con sus múltiples regex) dentro del bucle anidado O(N*M)
+            } for nombre in nombres_entrada]
+
+        stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
+
+        # ========== PREPROCESAMIENTO + ÍNDICE INVERTIDO ==========
         productos_preprocesados = []
-        for prod in productos:
-            try:
-                prod_expandido = expandir_fracciones(prod.get("nombre", ""))
-                prod_norm = normalizar_texto(prod_expandido)
-                palabras_prod = [normalizar_marca(p) for p in prod_norm.split() if len(p) > 1]
-                
-                marca_producto = None
-                for p in palabras_prod:
-                    if p in MARCAS:
-                        marca_producto = p
+        indice_tokens = defaultdict(set)  # token -> set(idx)
+
+        for idx, prod in enumerate(productos):
+            nombre_original = prod.get("nombre", "")
+            if not nombre_original:
+                continue
+
+            nombre_expandido = expandir_fracciones(nombre_original)
+            nombre_norm = normalizar_texto(nombre_expandido)
+            if not nombre_norm:
+                continue
+
+            tokens = [normalizar_marca(t) for t in nombre_norm.split() if len(t) > 1 and t not in stopwords]
+            if not tokens:
+                continue
+
+            token_set = set(tokens)
+            marca_producto = next((t for t in tokens if t in MARCAS), None)
+            medidas_producto = extraer_medidas(nombre_norm)
+
+            productos_preprocesados.append({
+                "original": prod,
+                "nombre_norm": nombre_norm,
+                "tokens": tokens,
+                "token_set": token_set,
+                "marca": marca_producto,
+                "medidas": medidas_producto,
+            })
+
+            for token in token_set:
+                indice_tokens[token].add(len(productos_preprocesados) - 1)
+
+        if not productos_preprocesados:
+            return [{
+                "nombre_original": nombre,
+                "producto_sugerido": None,
+                "score": 0,
+                "sospechoso": True,
+                "aprendido": False
+            } for nombre in nombres_entrada]
+
+        vocab_tokens = list(indice_tokens.keys())
+
+        def token_similarity(tq: str, tp: str) -> float:
+            """Similitud de token robusta y rápida."""
+            if tq == tp:
+                return 1.0
+            if tq in tp or tp in tq:
+                return min(len(tq), len(tp)) / max(len(tq), len(tp))
+            if len(tq) > 2 and len(tp) > 2:
+                return similitud_levenshtein(tq, tp)
+            return 0.0
+
+        def buscar_tokens_parecidos(token_query: str, max_resultados: int = 25) -> list[str]:
+            """Encuentra tokens del vocabulario parecidos al token buscado (para OCR/escritura manual)."""
+            cercanos = []
+            for tk in vocab_tokens:
+                if abs(len(tk) - len(token_query)) > 3:
+                    continue
+                sim = token_similarity(token_query, tk)
+                if sim >= 0.74:
+                    cercanos.append((tk, sim))
+
+            cercanos.sort(key=lambda x: x[1], reverse=True)
+            return [t for t, _ in cercanos[:max_resultados]]
+
+        def puntuar(query_norm: str, query_tokens: list[str], query_token_set: set[str],
+                    marca_buscada: str | None, medidas_query: set[str], p_data: dict) -> float:
+            tokens_prod = p_data["tokens"]
+            token_set_prod = p_data["token_set"]
+            nombre_prod_norm = p_data["nombre_norm"]
+
+            if not query_tokens or not tokens_prod:
+                return 0.0
+
+            # 1) Similitud por tokens (promedio de mejores coincidencias)
+            total = 0.0
+            criticas_total = 0
+            criticas_match = 0
+
+            for tq in query_tokens:
+                mejor = 0.0
+                for tp in token_set_prod:
+                    sim = palabras_similares(tq, tp)
+                    if sim > mejor:
+                        mejor = sim
+                    if mejor >= 0.995:
                         break
-                        
-                productos_preprocesados.append({
-                    "original": prod,
-                    "palabras": palabras_prod,
-                    "marca": marca_producto
-                })
-            except:
-                pass
-        
+                total += mejor
+
+                es_critica = (
+                    tq.isdigit() or
+                    tq in PALABRAS_IMPORTANTES or
+                    tq in UNIDADES_CRITICAS or
+                    tq in MARCAS or
+                    any(c.isdigit() for c in tq)
+                )
+                if es_critica:
+                    criticas_total += 1
+                    if mejor >= 0.72:
+                        criticas_match += 1
+
+            token_score = total / len(query_tokens)
+
+            # 2) Similitud global del string (Levenshtein + n-gramas)
+            lev = similitud_levenshtein(query_norm, nombre_prod_norm)
+            ngr = similitud_ngramas(query_norm, nombre_prod_norm, 2)
+            global_score = max(lev, ngr)
+
+            # 3) Coincidencia de medidas/números
+            medidas_prod = p_data["medidas"]
+            if medidas_query:
+                inter = len(medidas_query & medidas_prod)
+                medidas_score = inter / max(1, len(medidas_query))
+            else:
+                medidas_score = 1.0
+
+            score = (token_score * 0.58) + (global_score * 0.30) + (medidas_score * 0.12)
+
+            # Penalización por pocas palabras críticas coincidentes
+            if criticas_total > 0:
+                ratio_crit = criticas_match / criticas_total
+                if ratio_crit < 0.5:
+                    score *= 0.60
+                elif ratio_crit < 0.8:
+                    score *= 0.82
+
+            # Marca: fuerte impacto cuando el usuario sí escribió marca
+            marca_producto = p_data["marca"]
+            if marca_buscada:
+                if marca_producto:
+                    misma_marca = (
+                        marca_buscada == marca_producto or
+                        marca_producto in VARIACIONES_MARCA.get(marca_buscada, []) or
+                        marca_buscada in VARIACIONES_MARCA.get(marca_producto, [])
+                    )
+                    if misma_marca:
+                        score = min(1.0, score + 0.10)
+                    else:
+                        score *= 0.35
+                else:
+                    score *= 0.55
+
+            # Preferir productos más compactos en empates
+            score -= min(0.03, len(tokens_prod) * 0.002)
+            return max(0.0, min(1.0, score))
+
         resultados = []
-        for nombre_buscar in request.nombres:
+
+        # ========== MATCH POR CADA PRODUCTO SOLICITADO ==========
+        for nombre_buscar in nombres_entrada:
+            nombre_original = nombre_buscar or ""
+            nombre_limpio = nombre_original.strip()
+
+            if not nombre_limpio:
+                resultados.append({
+                    "nombre_original": nombre_original,
+                    "producto_sugerido": None,
+                    "score": 0,
+                    "sospechoso": True,
+                    "aprendido": False
+                })
+                continue
+
             mejor_match = None
-            mejor_score = 0
-            segundo_score = 0
+            mejor_score = 0.0
+            segundo_score = 0.0
             aprendido = False
-            
-            # PRIMERO: Buscar en aprendizajes previos
+
+            # 1) Priorizar aprendizaje previo
             try:
-                aprendizaje = buscar_aprendizaje(nombre_buscar)
+                aprendizaje = buscar_aprendizaje(nombre_limpio)
                 if aprendizaje:
                     producto_aprendido = productos_col.find_one({"_id": ObjectId(aprendizaje["producto_id"])})
                     if producto_aprendido:
@@ -1342,138 +1495,91 @@ def match_productos(request: MatchRequest):
                         mejor_score = 1.0
                         aprendido = True
             except Exception as e:
-                print(f"Error buscando aprendizaje: {e}")
-            
+                print(f"Error buscando aprendizaje para '{nombre_limpio}': {e}")
+
             if not aprendido:
-                # Expandir fracciones y normalizar búsqueda
-                busq_expandido = expandir_fracciones(nombre_buscar)
-                busq_norm = normalizar_texto(busq_expandido)
-                palabras_busq = [p for p in busq_norm.split() if len(p) > 1 or p.isdigit()]
-                
-                # Quitar stopwords
-                stopwords = {'de', 'la', 'el', 'en', 'con', 'para', 'por', 'un', 'una', 'los', 'las', 'y', 'o', 'a', 'x'}
-                palabras_busq = [p for p in palabras_busq if p not in stopwords]
-                
-                # DETECTAR MARCA EN LA BÚSQUEDA
-                marca_buscada = None
-                for p in palabras_busq:
-                    p_norm = normalizar_marca(p)
-                    if p_norm in MARCAS or p in MARCAS:
-                        marca_buscada = p_norm
-                        break
-                
-                # Normalizar marcas y variaciones
-                palabras_busq_norm = []
-                for p in palabras_busq:
-                    p_norm = normalizar_marca(p)
-                    palabras_busq_norm.append(p_norm)
-                    if p_norm in VARIACIONES_MARCA:
-                        for var in VARIACIONES_MARCA[p_norm][:2]:
-                            if var not in palabras_busq_norm:
-                                palabras_busq_norm.append(var)
-                
-                for p_data in productos_preprocesados:
-                    try:
-                        prod = p_data["original"]
-                        palabras_prod = p_data["palabras"]
-                        marca_producto = p_data["marca"]
-                        
-                        # SI HAY MARCA BUSCADA, VERIFICAR QUE COINCIDA
-                        if marca_buscada:
-                            marca_coincide = False
-                            if marca_producto:
-                                # Comparar marcas (considerando variaciones)
-                                if marca_buscada == marca_producto:
-                                    marca_coincide = True
-                                elif marca_buscada in VARIACIONES_MARCA and marca_producto in VARIACIONES_MARCA.get(marca_buscada, []):
-                                    marca_coincide = True
-                                elif marca_producto in VARIACIONES_MARCA and marca_buscada in VARIACIONES_MARCA.get(marca_producto, []):
-                                    marca_coincide = True
-                            
-                            # Si la marca no coincide, penalizar MUCHO
-                            if not marca_coincide:
-                                continue  # Saltar este producto completamente
-                        
-                        # Calcular coincidencias
-                        coincidencias = 0
-                        palabras_criticas_encontradas = 0
-                        palabras_criticas_total = 0
-                        
-                        for p_busq in palabras_busq_norm:
-                            es_critica = (p_busq.isdigit() or 
-                                         p_busq in PALABRAS_IMPORTANTES or 
-                                         p_busq in UNIDADES_CRITICAS or
-                                         p_busq in MARCAS or
-                                         any(c.isdigit() for c in p_busq))
-                            
-                            if es_critica:
-                                palabras_criticas_total += 1
-                            
-                            mejor_match_palabra = 0
-                            for p_prod in palabras_prod:
-                                sim = palabras_similares(p_busq, p_prod)
-                                mejor_match_palabra = max(mejor_match_palabra, sim)
-                                if mejor_match_palabra >= 1.0:
-                                    break
-                            
-                            if es_critica and mejor_match_palabra > 0.7:
-                                palabras_criticas_encontradas += 1
-                            
-                            coincidencias += mejor_match_palabra
-                        
-                        total_palabras = len(palabras_busq_norm)
-                        score = coincidencias / total_palabras if total_palabras > 0 else 0
-                        
-                        # BONUS por marca correcta
-                        if marca_buscada and marca_producto and (marca_buscada == marca_producto or 
-                            normalizar_marca(marca_buscada) == normalizar_marca(marca_producto)):
-                            score = min(1.0, score + 0.15)
-                        
-                        # Penalizar si no encuentra palabras críticas
-                        if palabras_criticas_total > 0:
-                            ratio_criticas = palabras_criticas_encontradas / palabras_criticas_total
-                            if ratio_criticas < 0.5:
-                                score *= 0.5
-                            elif ratio_criticas < 0.8:
-                                score *= 0.8
-                        
-                        if palabras_busq and palabras_prod:
-                            if normalizar_marca(palabras_busq[0]) == normalizar_marca(palabras_prod[0]):
-                                score = min(1.0, score + 0.1)
-                                
-                        # TIEBREAKER: Si tienen el mismo score, el nombre más corto debe ganar
-                        # Penalizamos ligeramente los nombres más largos (cada palabra extra quita 0.005)
-                        score -= len(palabras_prod) * 0.005
-                        
-                        if score > mejor_score:
-                            segundo_score = mejor_score
-                            mejor_score = score
-                            mejor_match = prod
-                        elif score > segundo_score:
-                            segundo_score = score
-                            
-                    except Exception as e:
-                        continue
-            
-            # Determinar si es sospechoso
+                # 2) Preprocesar query
+                query_expand = expandir_fracciones(nombre_limpio)
+                query_norm = normalizar_texto(query_expand)
+                query_tokens_raw = [normalizar_marca(t) for t in query_norm.split() if len(t) > 1 and t not in stopwords]
+
+                if not query_tokens_raw:
+                    resultados.append({
+                        "nombre_original": nombre_original,
+                        "producto_sugerido": None,
+                        "score": 0,
+                        "sospechoso": True,
+                        "aprendido": False
+                    })
+                    continue
+
+                # Quitar duplicados conservando orden
+                query_tokens = list(dict.fromkeys(query_tokens_raw))
+                query_token_set = set(query_tokens)
+
+                marca_buscada = next((t for t in query_tokens if t in MARCAS), None)
+                medidas_query = extraer_medidas(query_norm)
+
+                # 3) Generar candidatos por índice invertido
+                candidatos = set()
+
+                for tk in query_tokens:
+                    if tk in indice_tokens:
+                        candidatos.update(indice_tokens[tk])
+
+                # Si no hay candidatos directos, buscar tokens cercanos (OCR / typo)
+                if not candidatos:
+                    for tk in query_tokens:
+                        for similar in buscar_tokens_parecidos(tk):
+                            candidatos.update(indice_tokens.get(similar, set()))
+
+                # Último fallback: recorrer todo el catálogo preprocesado
+                if not candidatos:
+                    candidatos = set(range(len(productos_preprocesados)))
+
+                # Control de rendimiento: cap de candidatos por query
+                if len(candidatos) > 1200:
+                    # Priorizar candidatos con más intersección de tokens
+                    candidatos_ordenados = sorted(
+                        candidatos,
+                        key=lambda i: len(query_token_set & productos_preprocesados[i]["token_set"]),
+                        reverse=True
+                    )
+                    candidatos = set(candidatos_ordenados[:1200])
+
+                # 4) Puntuar candidatos
+                for idx_prod in candidatos:
+                    p_data = productos_preprocesados[idx_prod]
+                    score = puntuar(query_norm, query_tokens, query_token_set, marca_buscada, medidas_query, p_data)
+
+                    if score > mejor_score:
+                        segundo_score = mejor_score
+                        mejor_score = score
+                        mejor_match = p_data["original"]
+                    elif score > segundo_score:
+                        segundo_score = score
+
+            # 5) Clasificar confianza
             if aprendido:
                 sospechoso = False
-            elif mejor_score < 0.4:
+            elif mejor_match is None or mejor_score < 0.52:
                 sospechoso = True
-            elif mejor_score < 0.6:
+            elif mejor_score < 0.66:
                 sospechoso = True
             else:
-                sospechoso = mejor_score < 0.7 or (mejor_score - segundo_score < 0.1 and mejor_score < 0.85)
-            
+                gap = mejor_score - segundo_score
+                sospechoso = gap < 0.05 and mejor_score < 0.88
+
             resultados.append({
-                "nombre_original": nombre_buscar,
+                "nombre_original": nombre_original,
                 "producto_sugerido": serialize_doc(mejor_match) if mejor_match else None,
                 "score": round(mejor_score, 3),
                 "sospechoso": sospechoso,
                 "aprendido": aprendido
             })
-        
+
         return resultados
+
     except Exception as e:
         print(f"Error en match_productos: {e}")
         return [{
@@ -1482,7 +1588,7 @@ def match_productos(request: MatchRequest):
             "score": 0,
             "sospechoso": True,
             "aprendido": False
-        } for nombre in request.nombres]
+        } for nombre in (request.nombres or [])]
 
 class BorrarMultiplesRequest(BaseModel):
     ids: List[str]
