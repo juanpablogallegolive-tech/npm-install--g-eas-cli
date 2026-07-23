@@ -331,7 +331,7 @@ export default function QuoteClientScreen() {
                 <Text style={styles.resultPrice}>${prod.precio_final.toLocaleString()} ({prod.porcentaje_ganancia}%)</Text>
               </TouchableOpacity>
             )}
-            style={{ maxHeight: 200 }}
+            style={{ maxHeight: 250 }}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
           />
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
   itemCard: { backgroundColor: '#fafafa', padding: 12, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: '#e0e0e0' },
   itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   itemTitle: { fontSize: 16, fontWeight: 'bold', color: '#6200ee' },
-  resultsContainer: { backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginBottom: 8 },
+  resultsContainer: { backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginBottom: 8, maxHeight: 250 },
   resultItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   resultTitle: { fontSize: 14, fontWeight: '500', color: '#333' },
   resultPrice: { fontSize: 12, color: '#2e7d32', marginTop: 4 },
