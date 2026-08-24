@@ -13,14 +13,8 @@ config.cacheStores = [
 
 // Disable file watching to avoid ENOSPC errors
 config.watchFolders = [];
-config.watcher = {
-  watchman: {
-    enabled: false,
-  },
-  healthCheck: {
-    enabled: false,
-  },
-};
+// Metro 0.82+ no longer accepts the watcher.watchman.enabled option.
+// Leaving the watcher configuration out avoids the Expo Doctor warning.
 
 // Reduce the number of workers to decrease resource usage
 config.maxWorkers = 2;

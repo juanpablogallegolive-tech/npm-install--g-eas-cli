@@ -43,33 +43,36 @@ export default function ImportExportScreen() {
     setSnackVisible(true);
   };
 
-  // Crear archivo Excel con columnas separadas
-  const createExcelFile = (productos: any[]): string => {
-    // Crear datos para el Excel con columnas separadas
-    const data = productos.map((p) => ({
-      'Nombre': String(p.nombre || ''),
-      'Costo': p.costo || 0,
-      'Precio_Venta': p.precio_venta || 0,
-      'Comentarios': String(p.comentarios || ''),
-    }));
+  const normalizarEncabezado = (valor: unknown): string =>
+    String(valor ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '');
 
-    // Crear workbook y worksheet
-    const ws = XLSX.utils.json_to_sheet(data);
-    
-    // Ajustar ancho de columnas
-    ws['!cols'] = [
-      { wch: 40 }, // Nombre
-      { wch: 15 }, // Costo
-      { wch: 15 }, // Precio_Venta
-      { wch: 30 }, // Comentarios
-    ];
+  const parseNumero = (valor: unknown): number => {
+    if (typeof valor === 'number' && Number.isFinite(valor)) return valor;
+    const texto = String(valor ?? '').trim().replace(/[$\s]/g, '');
+    if (!texto) return 0;
+    const normalizado = texto.includes(',')
+      ? texto.replace(/\./g, '').replace(',', '.')
+      : texto.replace(/,/g, '');
+    const numero = Number(normalizado);
+    return Number.isFinite(numero) ? numero : 0;
+  };
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Productos');
-
-    // Generar como base64
-    const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    return wbout;
+  const productoDesdeFila = (row: any) => {
+    const valores: Record<string, unknown> = {};
+    Object.entries(row || {}).forEach(([key, value]) => {
+      valores[normalizarEncabezado(key)] = value;
+    });
+    return {
+      nombre: String(valores.nombre ?? '').trim(),
+      costo: parseNumero(valores.costo ?? valores.costooriginal),
+      precio_venta: parseNumero(valores.precioventa ?? valores.costobase ?? valores.precio),
+      cantidad: String(valores.cantidad ?? '').trim(),
+      comentarios: String(valores.comentarios ?? '').trim(),
+    };
   };
 
   // ========== EXPORTAR ==========
@@ -104,6 +107,7 @@ export default function ImportExportScreen() {
           'Nombre': '',
           'Costo': '',
           'Precio_Venta': '',
+          'Cantidad': '',
           'Comentarios': '',
         }];
       } else {
@@ -111,11 +115,12 @@ export default function ImportExportScreen() {
           'Nombre': String(p.nombre || ''),
           'Costo': p.costo || 0,
           'Precio_Venta': p.precio_venta || 0,
+          'Cantidad': String(p.cantidad || ''),
           'Comentarios': String(p.comentarios || ''),
         }));
       }
       const wsProductos = XLSX.utils.json_to_sheet(productosData);
-      wsProductos['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }];
+      wsProductos['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 30 }];
       XLSX.utils.book_append_sheet(wb, wsProductos, 'Productos');
 
       setProgress(0.5);
@@ -287,12 +292,18 @@ export default function ImportExportScreen() {
 
       const file = result.assets[0];
       const fileName = file.name || '';
-      const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+      const isExcel = /\.(xlsx|xls)$/i.test(fileName);
       
       setStatus('Leyendo archivo...');
       setProgress(0.2);
 
-      let productos: { nombre: string; costo: number; precio_venta: number }[] = [];
+      let productos: {
+        nombre: string;
+        costo: number;
+        precio_venta: number;
+        cantidad?: string;
+        comentarios?: string;
+      }[] = [];
 
       if (isExcel) {
         // Leer archivo Excel
@@ -306,11 +317,7 @@ export default function ImportExportScreen() {
           const ws = wb.Sheets[wsName];
           const jsonData = XLSX.utils.sheet_to_json(ws);
           
-          productos = jsonData.map((row: any) => ({
-            nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
-            costo: parseFloat(row['Costo'] || row['costo'] || row['COSTO'] || row['Costo_Original'] || row['costo_original'] || 0) || 0,
-            precio_venta: parseFloat(row['Precio_Venta'] || row['precio_venta'] || row['PRECIO_VENTA'] || row['Costo_Base'] || row['costo_base'] || row['Precio'] || 0) || 0,
-          }));
+          productos = jsonData.map(productoDesdeFila).filter((producto) => producto.nombre);
         } else {
           fileContent = await FileSystem.readAsStringAsync(file.uri, {
             encoding: FileSystem.EncodingType.Base64,
@@ -321,11 +328,7 @@ export default function ImportExportScreen() {
           const ws = wb.Sheets[wsName];
           const jsonData = XLSX.utils.sheet_to_json(ws);
           
-          productos = jsonData.map((row: any) => ({
-            nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
-            costo: parseFloat(row['Costo'] || row['costo'] || row['COSTO'] || row['Costo_Original'] || row['costo_original'] || 0) || 0,
-            precio_venta: parseFloat(row['Precio_Venta'] || row['precio_venta'] || row['PRECIO_VENTA'] || row['Costo_Base'] || row['costo_base'] || row['Precio'] || 0) || 0,
-          }));
+          productos = jsonData.map(productoDesdeFila).filter((producto) => producto.nombre);
         }
       } else {
         // Leer CSV (mantener compatibilidad)
@@ -350,10 +353,11 @@ export default function ImportExportScreen() {
           return;
         }
 
-        const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+        const delimitador = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+        const header = parseCSVLine(lines[0], delimitador).map(h => normalizarEncabezado(h));
         const iNombre = header.findIndex(h => h.includes('nombre') || h.includes('name'));
-        const iCosto = header.findIndex(h => h.includes('costo') && !h.includes('venta'));
-        const iPrecioVenta = header.findIndex(h => h.includes('venta') || h.includes('precio'));
+        const iCosto = header.findIndex(h => h === 'costo' || h.includes('costooriginal'));
+        const iPrecioVenta = header.findIndex(h => h.includes('precioventa') || h.includes('costobase') || h === 'precio');
 
         if (iNombre === -1) {
           Alert.alert('Error', 'No se encontró columna Nombre');
@@ -361,13 +365,13 @@ export default function ImportExportScreen() {
         }
 
         for (let i = 1; i < lines.length; i++) {
-          const cols = parseCSVLine(lines[i]);
+          const cols = parseCSVLine(lines[i], delimitador);
           const nombre = (cols[iNombre] || '').trim();
           if (nombre) {
             productos.push({
               nombre,
-              costo: parseFloat(cols[iCosto] || '0') || 0,
-              precio_venta: parseFloat(cols[iPrecioVenta] || cols[iCosto] || '0') || 0,
+              costo: parseNumero(cols[iCosto] || '0'),
+              precio_venta: parseNumero(cols[iPrecioVenta] || cols[iCosto] || '0'),
             });
           }
         }
@@ -394,26 +398,32 @@ export default function ImportExportScreen() {
 
       for (let i = 0; i < productos.length; i++) {
         try {
-          const { nombre, costo, precio_venta } = productos[i];
+              const { nombre, costo, precio_venta, cantidad = '', comentarios = '' } = productos[i];
           
           if (!nombre) { errores++; continue; }
 
           const existing = existingMap.get(nombre.toLowerCase().trim());
 
           if (existing) {
-            if (Math.abs((existing.precio_venta || 0) - precio_venta) > 0.01) {
+            if (
+            Math.abs((existing.costo || 0) - costo) > 0.01 ||
+            Math.abs((existing.precio_venta || 0) - precio_venta) > 0.01 ||
+            String(existing.cantidad || '') !== cantidad ||
+            (comentarios && String(existing.comentarios || '') !== comentarios)
+          ) {
               await productosApi.update(existing._id, {
-                ...existing,
+                nombre: existing.nombre,
                 costo,
                 precio_venta,
-                comentarios: (existing.comentarios || '') + `\n[Actualizado desde Excel: ${new Date().toLocaleDateString()}]`,
+                cantidad,
+                comentarios: comentarios || existing.comentarios || '',
               });
               actualizados++;
             } else {
               sinCambios++;
             }
           } else {
-            await productosApi.create({ nombre, costo, precio_venta, comentarios: '' });
+            await productosApi.create({ nombre, costo, precio_venta, cantidad, comentarios });
             nuevos++;
           }
 
@@ -442,13 +452,15 @@ export default function ImportExportScreen() {
     }
   };
 
-  const parseCSVLine = (line: string): string[] => {
+  const parseCSVLine = (line: string, delimiter = ','): string[] => {
     const r: string[] = [];
     let c = '', q = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
-      if (ch === '"') { q = !q; }
-      else if (ch === ',' && !q) { r.push(c.trim()); c = ''; }
+      if (ch === '"') {
+        if (q && line[i + 1] === '"') { c += '"'; i++; }
+        else { q = !q; }
+      } else if (ch === delimiter && !q) { r.push(c.trim()); c = ''; }
       else if (ch !== '\r') { c += ch; }
     }
     r.push(c.trim());

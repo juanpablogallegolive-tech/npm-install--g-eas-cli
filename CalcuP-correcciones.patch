@@ -1,0 +1,1144 @@
+diff --git a/.python-version b/.python-version
+new file mode 100644
+index 0000000..7eebfaf
+--- /dev/null
++++ b/.python-version
+@@ -0,0 +1 @@
++3.12.11
+diff --git a/GENERAR_APK.cmd b/GENERAR_APK.cmd
+new file mode 100644
+index 0000000..4817f37
+--- /dev/null
++++ b/GENERAR_APK.cmd
+@@ -0,0 +1,31 @@
++@echo off
++setlocal
++cd /d "%~dp0frontend"
++echo.
++echo ========================================
++echo        CALCUP - GENERAR APK
++ECHO ========================================
++where node >nul 2>nul || (
++  echo ERROR: Instala Node.js LTS desde https://nodejs.org/
++  pause
++  exit /b 1
++)
++call npm install --legacy-peer-deps
++if errorlevel 1 goto :error
++call npx eas-cli@latest whoami
++if errorlevel 1 (
++  echo Inicia sesion con la cuenta Expo propietaria del proyecto.
++  call npx eas-cli@latest login
++  if errorlevel 1 goto :error
++)
++call npx eas-cli@latest build --platform android --profile preview --clear-cache
++if errorlevel 1 goto :error
++echo.
++echo APK solicitado correctamente. EAS mostrara el enlace de descarga.
++pause
++exit /b 0
++:error
++echo.
++echo ERROR: No fue posible generar el APK. Revisa el mensaje anterior.
++pause
++exit /b 1
+diff --git a/INSTALAR_Y_PROBAR.cmd b/INSTALAR_Y_PROBAR.cmd
+new file mode 100644
+index 0000000..03ee03c
+--- /dev/null
++++ b/INSTALAR_Y_PROBAR.cmd
+@@ -0,0 +1,34 @@
++@echo off
++setlocal
++cd /d "%~dp0frontend"
++echo.
++echo ========================================
++echo   CALCUP - INSTALAR Y ABRIR EN EXPO
++ECHO ========================================
++where node >nul 2>nul || (
++  echo ERROR: Node.js no esta instalado.
++  echo Descarga Node.js LTS desde https://nodejs.org/
++  pause
++  exit /b 1
++)
++echo Node:
++node --version
++echo NPM:
++npm --version
++echo.
++echo Instalando dependencias del proyecto...
++call npm install --legacy-peer-deps
++if errorlevel 1 goto :error
++echo.
++echo Comprobando Expo...
++call npx expo-doctor
++if errorlevel 1 echo AVISO: Expo Doctor encontro observaciones. Revisa el texto anterior.
++echo.
++echo Abriendo Expo con cache limpia...
++call npx expo start --clear
++exit /b 0
++:error
++echo.
++echo ERROR: La instalacion no termino correctamente.
++pause
++exit /b 1
+diff --git a/PROBAR_BACKEND.cmd b/PROBAR_BACKEND.cmd
+new file mode 100644
+index 0000000..a102596
+--- /dev/null
++++ b/PROBAR_BACKEND.cmd
+@@ -0,0 +1,19 @@
++@echo off
++setlocal
++set "BASE=https://npm-install-g-eas-cli.onrender.com"
++echo.
++echo ========================================
++echo       CALCUP - PROBAR BACKEND
++ECHO ========================================
++echo.
++echo [1/2] Estado de API y MongoDB:
++curl.exe --max-time 100 -i "%BASE%/api/health"
++echo.
++echo.
++echo [2/2] Conteo de productos:
++curl.exe --max-time 100 -i "%BASE%/api/productos/count"
++echo.
++echo.
++echo RESULTADO CORRECTO: ambos deben mostrar HTTP 200.
++echo Si aparece HTTP 503, revisa MONGO_URL en Render.
++pause
+diff --git a/README_CORRECCIONES.md b/README_CORRECCIONES.md
+new file mode 100644
+index 0000000..4f9b898
+--- /dev/null
++++ b/README_CORRECCIONES.md
+@@ -0,0 +1,37 @@
++# CalcuP — versión corregida
++
++## Correcciones incluidas
++
++- La API espera hasta 90 segundos durante el arranque en frío de Render Free.
++- Los errores de red, servidor y MongoDB ahora se muestran de forma comprensible.
++- `/api/health` comprueba realmente la conexión con MongoDB.
++- MongoDB deja de esperar 30 segundos: falla de forma clara en aproximadamente 5 segundos.
++- Importación de Excel/CSV por lotes de 500 productos, en lugar de una petición por fila.
++- Lectura de CSV separado por coma o punto y coma.
++- Lectura de precios en formato colombiano (`1.234,56`) o internacional (`1,234.56`).
++- Corrección de `HTMLResponse`, CORS y configuración de Render.
++- Expo/EAS enlazado al proyecto y URL del backend incluida en todos los perfiles.
++- Scripts de Windows para instalar, probar y generar el APK.
++
++## Uso en Windows
++
++1. Extrae el ZIP en una carpeta nueva.
++2. Ejecuta `PROBAR_BACKEND.cmd`. Los dos resultados deben ser HTTP 200.
++3. Ejecuta `INSTALAR_Y_PROBAR.cmd` para instalar dependencias y abrir Expo.
++4. Ejecuta `GENERAR_APK.cmd` para solicitar un APK nuevo en EAS.
++
++## Configuración obligatoria en Render
++
++En el servicio `npm-install--g-eas-cli`, sección **Environment**:
++
++- `MONGO_URL`: conexión completa de MongoDB Atlas, sin comillas.
++- `DB_NAME`: `calculadora_precios`.
++- `MONGO_TIMEOUT_MS`: `5000`.
++
++En MongoDB Atlas:
++
++- El clúster debe estar activo.
++- El usuario debe tener permisos de lectura/escritura.
++- Network Access debe permitir la conexión desde Render (por ejemplo `0.0.0.0/0`).
++
++Nunca compartas ni subas a GitHub la contraseña o el valor completo de `MONGO_URL`.
+diff --git a/SUBIR_CORRECCIONES_GITHUB.cmd b/SUBIR_CORRECCIONES_GITHUB.cmd
+new file mode 100644
+index 0000000..5df07cb
+--- /dev/null
++++ b/SUBIR_CORRECCIONES_GITHUB.cmd
+@@ -0,0 +1,56 @@
++@echo off
++setlocal EnableExtensions
++set "REPO=https://github.com/juanpablogallegolive-tech/npm-install--g-eas-cli.git"
++set "PATCH=%~dp0CalcuP-correcciones.patch"
++set "DEST=%USERPROFILE%\Desktop\CalcuP-corregido-GitHub"
++if exist "%DEST%" set "DEST=%USERPROFILE%\Desktop\CalcuP-corregido-GitHub-%RANDOM%"
++
++echo.
++echo ========================================
++echo  CALCUP - PREPARAR Y SUBIR CORRECCIONES
++ECHO ========================================
++where git >nul 2>nul || (
++  echo ERROR: Git no esta instalado.
++  echo Descargalo desde https://git-scm.com/
++  pause
++  exit /b 1
++)
++if not exist "%PATCH%" (
++  echo ERROR: No se encontro CalcuP-correcciones.patch junto a este archivo.
++  pause
++  exit /b 1
++)
++
++echo Descargando la version actual de GitHub...
++git clone "%REPO%" "%DEST%"
++if errorlevel 1 goto :error
++cd /d "%DEST%"
++
++echo Aplicando correcciones verificadas...
++git apply --whitespace=fix "%PATCH%"
++if errorlevel 1 goto :error
++> "frontend\.env" echo EXPO_PUBLIC_BACKEND_URL=https://npm-install-g-eas-cli.onrender.com
++
++git config user.name >nul 2>nul || git config user.name "Juan Pablo"
++git config user.email >nul 2>nul || git config user.email "juanpablogallegolive@gmail.com"
++git add .
++git commit -m "Fix: conexion, importacion por lotes y Expo"
++if errorlevel 1 goto :error
++
++echo Subiendo a GitHub. Puede abrirse el inicio de sesion en el navegador...
++git push origin main
++if errorlevel 1 goto :error
++
++echo.
++echo LISTO: GitHub fue actualizado y Render iniciara el deploy.
++echo Carpeta local nueva: %DEST%
++echo Cuando Render termine, ejecuta PROBAR_BACKEND.cmd en esa carpeta.
++pause
++exit /b 0
++
++:error
++echo.
++echo ERROR: El proceso no termino. No se borro tu proyecto anterior.
++echo Carpeta de trabajo: %DEST%
++pause
++exit /b 1
+diff --git a/backend/.env.example b/backend/.env.example
+new file mode 100644
+index 0000000..e2c95b9
+--- /dev/null
++++ b/backend/.env.example
+@@ -0,0 +1,4 @@
++# No subas secretos a GitHub. En Render configura estas variables en Environment.
++MONGO_URL=mongodb+srv://USUARIO:CONTRASENA@CLUSTER.mongodb.net/?retryWrites=true&w=majority
++DB_NAME=calculadora_precios
++MONGO_TIMEOUT_MS=5000
+diff --git a/backend/requirements.txt b/backend/requirements.txt
+index f49f5ea..05f7e56 100644
+--- a/backend/requirements.txt
++++ b/backend/requirements.txt
+@@ -1,7 +1,7 @@
+-fastapi>=0.110.0,<1.0.0
+-uvicorn[standard]>=0.25.0,<1.0.0
+-pydantic>=2.6.0,<3.0.0
+-pymongo[srv]>=4.5.0,<5.0.0
+-python-dotenv>=1.0.0,<2.0.0
+-python-multipart>=0.0.9,<1.0.0
+-requests>=2.31.0,<3.0.0
++fastapi==0.141.1
++uvicorn[standard]==0.52.3
++pydantic==2.13.4
++pymongo==4.17.0
++python-dotenv==1.2.2
++python-multipart==0.0.32
++requests==2.34.2
+diff --git a/backend/server.py b/backend/server.py
+index 1e95b30..b30d750 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -1,9 +1,11 @@
+-from fastapi import FastAPI, HTTPException, UploadFile, File
++from fastapi import FastAPI, HTTPException, UploadFile, File, Request
+ from fastapi.middleware.cors import CORSMiddleware
++from fastapi.responses import HTMLResponse, JSONResponse
+ from pydantic import BaseModel, Field
+ from typing import List, Optional, Dict, Any
+ from datetime import datetime
+-from pymongo import MongoClient
++from pymongo import MongoClient, InsertOne, UpdateOne
++from pymongo.errors import PyMongoError
+ from bson import ObjectId
+ import os
+ from collections import defaultdict
+@@ -11,21 +13,35 @@ from dotenv import load_dotenv
+ 
+ load_dotenv()
+ 
+-app = FastAPI()
++app = FastAPI(title="Calculadora de Precios API", version="1.2.0")
+ 
+ # CORS
+ app.add_middleware(
+     CORSMiddleware,
+     allow_origins=["*"],
+-    allow_credentials=True,
++    # No se usan cookies ni autenticación por sesión. Credenciales + origen "*"
++    # es una combinación inválida para navegadores y rompe Expo Web.
++    allow_credentials=False,
+     allow_methods=["*"],
+     allow_headers=["*"],
+ )
+ 
+-# MongoDB - CORREGIDO: Lee DB_NAME del environment
+-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+-client = MongoClient(MONGO_URL)
+-DB_NAME = os.getenv("DB_NAME", "calculadora_precios")
++# MongoDB
++# En producción MONGO_URL debe existir en Render. El fallback local se mantiene
++# únicamente para desarrollo, pero el health check indicará si no hay conexión.
++MONGO_URL_FROM_ENV = os.getenv("MONGO_URL", "").strip()
++MONGO_CONFIGURED = bool(MONGO_URL_FROM_ENV)
++MONGO_URL = MONGO_URL_FROM_ENV or "mongodb://localhost:27017"
++MONGO_TIMEOUT_MS = int(os.getenv("MONGO_TIMEOUT_MS", "5000"))
++DB_NAME = os.getenv("DB_NAME", "calculadora_precios").strip() or "calculadora_precios"
++
++client = MongoClient(
++    MONGO_URL,
++    serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
++    connectTimeoutMS=MONGO_TIMEOUT_MS,
++    socketTimeoutMS=15000,
++    connect=False,
++)
+ db = client[DB_NAME]
+ 
+ # Colecciones
+@@ -35,6 +51,18 @@ calculos_col = db["calculos"]
+ cotizaciones_col = db["cotizaciones"]
+ aprendizajes_col = db["aprendizajes"]  # Para aprendizaje de IA
+ 
++
++@app.exception_handler(PyMongoError)
++async def mongo_exception_handler(_request: Request, error: PyMongoError):
++    """Evita filtrar credenciales y devuelve un mensaje útil al frontend."""
++    print(f"MongoDB no disponible: {type(error).__name__}")
++    return JSONResponse(
++        status_code=503,
++        content={
++            "detail": "La base de datos no está disponible. Revisa MONGO_URL y el acceso de MongoDB Atlas."
++        },
++    )
++
+ # ==================== MODELS ====================
+ 
+ class PyObjectId(ObjectId):
+@@ -84,6 +112,17 @@ class ProductoResponse(Producto):
+     class Config:
+         populate_by_name = True
+ 
++
++class ProductoImportacion(BaseModel):
++    nombre: str = Field(min_length=1, max_length=500)
++    costo: float = 0
++    precio_venta: float = 0
++    comentarios: Optional[str] = ""
++
++
++class ImportarProductosRequest(BaseModel):
++    productos: List[ProductoImportacion] = Field(min_length=1, max_length=10000)
++
+ class Cliente(BaseModel):
+     nombre: str
+     porcentaje_ganancia: float
+@@ -201,6 +240,82 @@ def buscar_productos(q: str, limit: int = 200):
+     productos = list(productos_col.find({"nombre": regex}).limit(limit))
+     return [serialize_doc(p) for p in productos]
+ 
++@app.post("/api/productos/importar-lote")
++def importar_productos_lote(request: ImportarProductosRequest):
++    """Inserta o actualiza productos en una sola operación de red."""
++    # El último producto con un mismo nombre gana. Esto evita operaciones
++    # contradictorias cuando el Excel contiene filas duplicadas.
++    por_nombre: Dict[str, ProductoImportacion] = {}
++    filas_invalidas = 0
++    for producto in request.productos:
++        nombre = producto.nombre.strip()
++        if not nombre:
++            filas_invalidas += 1
++            continue
++        producto.nombre = nombre
++        por_nombre[nombre.casefold()] = producto
++
++    if not por_nombre:
++        raise HTTPException(status_code=400, detail="El archivo no contiene productos válidos")
++
++    existentes = {
++        str(doc.get("nombre", "")).strip().casefold(): doc
++        for doc in productos_col.find({}, {"nombre": 1, "costo": 1, "precio_venta": 1})
++        if str(doc.get("nombre", "")).strip()
++    }
++
++    operaciones = []
++    nuevos = 0
++    actualizados = 0
++    sin_cambios = 0
++    ahora = datetime.now()
++
++    for clave, producto in por_nombre.items():
++        actual = existentes.get(clave)
++        costo = float(producto.costo or 0)
++        precio_venta = float(producto.precio_venta or 0)
++
++        if actual is None:
++            operaciones.append(InsertOne({
++                "nombre": producto.nombre,
++                "costo": costo,
++                "precio_venta": precio_venta,
++                "cantidad": "",
++                "flujo_id": None,
++                "comentarios": producto.comentarios or "",
++                "fecha_creacion": ahora,
++            }))
++            nuevos += 1
++            continue
++
++        costo_cambio = abs(float(actual.get("costo", 0) or 0) - costo) > 0.001
++        precio_cambio = abs(float(actual.get("precio_venta", 0) or 0) - precio_venta) > 0.001
++        if costo_cambio or precio_cambio:
++            operaciones.append(UpdateOne(
++                {"_id": actual["_id"]},
++                {"$set": {
++                    "costo": costo,
++                    "precio_venta": precio_venta,
++                    "fecha_actualizacion": ahora,
++                }},
++            ))
++            actualizados += 1
++        else:
++            sin_cambios += 1
++
++    if operaciones:
++        productos_col.bulk_write(operaciones, ordered=False)
++
++    return {
++        "nuevos": nuevos,
++        "actualizados": actualizados,
++        "sinCambios": sin_cambios,
++        "errores": filas_invalidas,
++        "duplicadosOmitidos": len(request.productos) - len(por_nombre),
++        "procesados": len(por_nombre),
++    }
++
++
+ @app.get("/api/productos/{producto_id}")
+ def get_producto(producto_id: str):
+     producto = productos_col.find_one({"_id": ObjectId(producto_id)})
+@@ -1553,17 +1668,42 @@ def eliminar_multiples_productos(request: BorrarMultiplesRequest):
+ 
+ @app.get("/")
+ def root():
+-    return {"status": "ok", "message": "Calculadora Backend API está activa", "database": DB_NAME}
++    return {
++        "status": "ok",
++        "message": "Calculadora Backend API está activa",
++        "version": "1.2.0",
++    }
++
+ 
+ @app.get("/api/health")
+ def health_check():
+-    return {"status": "ok", "database": DB_NAME}
+-
+-# Cargar sinónimos dinámicos al iniciar el servidor
+-try:
+-    extraer_sinonimos_dinamicos()
+-except Exception as e:
+-    print(f"⚠️ No se pudieron cargar sinónimos dinámicos en el arranque: {e}")
++    """Comprueba de verdad que la API y MongoDB estén disponibles."""
++    if not MONGO_CONFIGURED and os.getenv("RENDER"):
++        raise HTTPException(
++            status_code=503,
++            detail="MONGO_URL no está configurada en Render",
++        )
++    try:
++        client.admin.command("ping")
++    except PyMongoError as error:
++        print(f"Health MongoDB falló: {type(error).__name__}")
++        raise HTTPException(
++            status_code=503,
++            detail="API activa, pero MongoDB no está disponible. Revisa MONGO_URL y MongoDB Atlas.",
++        ) from error
++    return {"status": "ok", "database": DB_NAME, "mongodb": "connected"}
++
++
++@app.on_event("startup")
++def cargar_sinonimos_al_iniciar():
++    """Carga datos auxiliares sin dejar el arranque esperando 30 segundos."""
++    try:
++        client.admin.command("ping")
++        extraer_sinonimos_dinamicos()
++    except PyMongoError as error:
++        print(f"Sinónimos no cargados: MongoDB no disponible ({type(error).__name__})")
++    except Exception as error:
++        print(f"Sinónimos no cargados: {type(error).__name__}")
+ 
+ 
+ @app.get("/api/stats")
+@@ -1682,5 +1822,5 @@ if __name__ == "__main__":
+     port = int(os.getenv("PORT", "8000"))
+     print(f"🚀 CalcuP Backend iniciando en http://{host}:{port}")
+     print(f"📦 Base de datos: {DB_NAME}")
+-    print(f"🔗 MongoDB: {MONGO_URL[:30]}...")
++    print(f"🔗 MongoDB configurado: {MONGO_CONFIGURED}")
+     uvicorn.run(app, host=host, port=port)
+diff --git a/frontend/.env.example b/frontend/.env.example
+new file mode 100644
+index 0000000..774fd78
+--- /dev/null
++++ b/frontend/.env.example
+@@ -0,0 +1 @@
++EXPO_PUBLIC_BACKEND_URL=https://npm-install-g-eas-cli.onrender.com
+diff --git a/frontend/.gitignore b/frontend/.gitignore
+index 9ffd4d7..c79c295 100644
+--- a/frontend/.gitignore
++++ b/frontend/.gitignore
+@@ -20,6 +20,7 @@ expo-env.d.ts
+ 
+ # Metro
+ .metro-health-check*
++.metro-cache/
+ 
+ # debug
+ npm-debug.*
+diff --git a/frontend/app.json b/frontend/app.json
+index 4f67723..7521c6b 100644
+--- a/frontend/app.json
++++ b/frontend/app.json
+@@ -2,7 +2,7 @@
+   "expo": {
+     "name": "Calculadora de Precios",
+     "slug": "calculadora-precios",
+-    "version": "1.0.0",
++    "version": "1.0.1",
+     "orientation": "portrait",
+     "icon": "./assets/images/icon.png",
+     "scheme": "calculadora-precios",
+@@ -20,7 +20,7 @@
+     "ios": {
+       "supportsTablet": true,
+       "bundleIdentifier": "com.calculadoraprecios.app",
+-      "buildNumber": "1.0.0",
++      "buildNumber": "1.0.1",
+       "infoPlist": {
+         "NSCameraUsageDescription": "Esta app necesita acceso a la cámara para escanear códigos de productos",
+         "NSPhotoLibraryUsageDescription": "Esta app necesita acceso a la galería para adjuntar imágenes de productos"
+@@ -32,7 +32,7 @@
+         "backgroundColor": "#6200ee"
+       },
+       "package": "com.juanpablo.calculadoraprecios",
+-      "versionCode": 2,
++      "versionCode": 3,
+       "permissions": [
+         "CAMERA",
+         "READ_EXTERNAL_STORAGE",
+@@ -71,7 +71,11 @@
+     "extra": {
+       "router": {
+         "origin": false
++      },
++      "eas": {
++        "projectId": "caad2d54-a6ba-4b5f-a778-64f4763406e6"
+       }
+-    }
++    },
++    "owner": "juan1432"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/frontend/app/import-export.tsx b/frontend/app/import-export.tsx
+index 727a19e..69ad556 100644
+--- a/frontend/app/import-export.tsx
++++ b/frontend/app/import-export.tsx
+@@ -261,6 +261,87 @@ export default function ImportExportScreen() {
+     }
+   };
+ 
++  const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
++
++  const ejecutarConReintento = async <T,>(accion: () => Promise<T>, intentos = 3): Promise<T> => {
++    let ultimoError: unknown;
++    for (let intento = 1; intento <= intentos; intento++) {
++      try {
++        return await accion();
++      } catch (error) {
++        ultimoError = error;
++        const status = (error as { status?: number })?.status;
++        // No repetir errores permanentes del cliente.
++        if (status && status >= 400 && status < 500 && status !== 408 && status !== 429) throw error;
++        if (intento < intentos) await esperar(1000 * intento);
++      }
++    }
++    throw ultimoError;
++  };
++
++  /** Compatibilidad con el backend anterior, que no tenía importación por lotes. */
++  const importarConApiAnterior = async (
++    productos: { nombre: string; costo: number; precio_venta: number }[],
++  ) => {
++    const existingRes = await ejecutarConReintento(() => productosApi.getAll());
++    const existingMap = new Map<string, any>();
++    existingRes.data.forEach((producto: any) => {
++      existingMap.set(String(producto.nombre || '').trim().toLowerCase(), producto);
++    });
++
++    let nuevos = 0;
++    let actualizados = 0;
++    let sinCambios = 0;
++    let errores = 0;
++
++    for (let index = 0; index < productos.length; index++) {
++      const producto = productos[index];
++      const clave = producto.nombre.trim().toLowerCase();
++      if (!clave) {
++        errores++;
++        continue;
++      }
++
++      try {
++        const actual = existingMap.get(clave);
++        if (actual) {
++          const cambioCosto = Math.abs(Number(actual.costo || 0) - producto.costo) > 0.001;
++          const cambioPrecio = Math.abs(Number(actual.precio_venta || 0) - producto.precio_venta) > 0.001;
++          if (cambioCosto || cambioPrecio) {
++            await ejecutarConReintento(() => productosApi.update(actual._id, {
++              ...actual,
++              costo: producto.costo,
++              precio_venta: producto.precio_venta,
++            }));
++            existingMap.set(clave, { ...actual, ...producto });
++            actualizados++;
++          } else {
++            sinCambios++;
++          }
++        } else {
++          const response = await ejecutarConReintento(() => productosApi.create({
++            nombre: producto.nombre,
++            costo: producto.costo,
++            precio_venta: producto.precio_venta,
++            comentarios: '',
++          }));
++          existingMap.set(clave, response.data);
++          nuevos++;
++        }
++      } catch (error) {
++        console.warn(`No se pudo importar la fila ${index + 1}:`, error);
++        errores++;
++      }
++
++      if (index % 10 === 0 || index === productos.length - 1) {
++        setStatus(`Importando ${index + 1}/${productos.length}...`);
++        setProgress(0.3 + (0.65 * (index + 1) / productos.length));
++      }
++    }
++
++    return { nuevos, actualizados, sinCambios, errores };
++  };
++
+   // ========== IMPORTAR ==========
+   const importarDatos = async () => {
+     setLoading(true);
+@@ -285,8 +366,11 @@ export default function ImportExportScreen() {
+         return;
+       }
+ 
+-      const file = result.assets[0];
+-      const fileName = file.name || '';
++      const file = result.assets?.[0];
++      if (!file?.uri) {
++        throw new Error('No se pudo acceder al archivo seleccionado');
++      }
++      const fileName = (file.name || '').toLowerCase();
+       const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+       
+       setStatus('Leyendo archivo...');
+@@ -308,8 +392,8 @@ export default function ImportExportScreen() {
+           
+           productos = jsonData.map((row: any) => ({
+             nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
+-            costo: parseFloat(row['Costo'] || row['costo'] || row['COSTO'] || row['Costo_Original'] || row['costo_original'] || 0) || 0,
+-            precio_venta: parseFloat(row['Precio_Venta'] || row['precio_venta'] || row['PRECIO_VENTA'] || row['Costo_Base'] || row['costo_base'] || row['Precio'] || 0) || 0,
++            costo: parseNumber(row['Costo'] ?? row['costo'] ?? row['COSTO'] ?? row['Costo_Original'] ?? row['costo_original'] ?? 0),
++            precio_venta: parseNumber(row['Precio_Venta'] ?? row['precio_venta'] ?? row['PRECIO_VENTA'] ?? row['Costo_Base'] ?? row['costo_base'] ?? row['Precio'] ?? 0),
+           }));
+         } else {
+           fileContent = await FileSystem.readAsStringAsync(file.uri, {
+@@ -323,8 +407,8 @@ export default function ImportExportScreen() {
+           
+           productos = jsonData.map((row: any) => ({
+             nombre: String(row['Nombre'] || row['nombre'] || row['NOMBRE'] || '').trim(),
+-            costo: parseFloat(row['Costo'] || row['costo'] || row['COSTO'] || row['Costo_Original'] || row['costo_original'] || 0) || 0,
+-            precio_venta: parseFloat(row['Precio_Venta'] || row['precio_venta'] || row['PRECIO_VENTA'] || row['Costo_Base'] || row['costo_base'] || row['Precio'] || 0) || 0,
++            costo: parseNumber(row['Costo'] ?? row['costo'] ?? row['COSTO'] ?? row['Costo_Original'] ?? row['costo_original'] ?? 0),
++            precio_venta: parseNumber(row['Precio_Venta'] ?? row['precio_venta'] ?? row['PRECIO_VENTA'] ?? row['Costo_Base'] ?? row['costo_base'] ?? row['Precio'] ?? 0),
+           }));
+         }
+       } else {
+@@ -350,7 +434,8 @@ export default function ImportExportScreen() {
+           return;
+         }
+ 
+-        const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
++        const delimiter = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
++        const header = parseCSVLine(lines[0], delimiter).map(h => h.replace(/"/g, '').trim().toLowerCase());
+         const iNombre = header.findIndex(h => h.includes('nombre') || h.includes('name'));
+         const iCosto = header.findIndex(h => h.includes('costo') && !h.includes('venta'));
+         const iPrecioVenta = header.findIndex(h => h.includes('venta') || h.includes('precio'));
+@@ -361,13 +446,13 @@ export default function ImportExportScreen() {
+         }
+ 
+         for (let i = 1; i < lines.length; i++) {
+-          const cols = parseCSVLine(lines[i]);
++          const cols = parseCSVLine(lines[i], delimiter);
+           const nombre = (cols[iNombre] || '').trim();
+           if (nombre) {
+             productos.push({
+               nombre,
+-              costo: parseFloat(cols[iCosto] || '0') || 0,
+-              precio_venta: parseFloat(cols[iPrecioVenta] || cols[iCosto] || '0') || 0,
++              costo: parseNumber(cols[iCosto] || '0'),
++              precio_venta: parseNumber(cols[iPrecioVenta] || cols[iCosto] || '0'),
+             });
+           }
+         }
+@@ -381,56 +466,56 @@ export default function ImportExportScreen() {
+       setProgress(0.3);
+       setStatus(`Procesando ${productos.length} productos...`);
+ 
+-      // Productos existentes
+-      const existingRes = await productosApi.getAll();
+-      const existingMap = new Map<string, any>();
+-      existingRes.data.forEach((p: any) => {
+-        existingMap.set(p.nombre.toLowerCase().trim(), p);
+-      });
+-
+-      // Procesar
+-      let nuevos = 0, actualizados = 0, sinCambios = 0, errores = 0;
++      // Importar por lotes. La versión anterior realizaba una petición HTTP por
++      // cada fila, lo que era lento y se interrumpía fácilmente en redes móviles.
++      let nuevos = 0;
++      let actualizados = 0;
++      let sinCambios = 0;
++      let errores = 0;
++      const batchSize = 500;
+       const total = productos.length;
+ 
+-      for (let i = 0; i < productos.length; i++) {
+-        try {
+-          const { nombre, costo, precio_venta } = productos[i];
+-          
+-          if (!nombre) { errores++; continue; }
+-
+-          const existing = existingMap.get(nombre.toLowerCase().trim());
+-
+-          if (existing) {
+-            if (Math.abs((existing.precio_venta || 0) - precio_venta) > 0.01) {
+-              await productosApi.update(existing._id, {
+-                ...existing,
+-                costo,
+-                precio_venta,
+-                comentarios: (existing.comentarios || '') + `\n[Actualizado desde Excel: ${new Date().toLocaleDateString()}]`,
+-              });
+-              actualizados++;
+-            } else {
+-              sinCambios++;
+-            }
+-          } else {
+-            await productosApi.create({ nombre, costo, precio_venta, comentarios: '' });
+-            nuevos++;
+-          }
+-
+-          if (i % 10 === 0) {
+-            setProgress(0.3 + (0.6 * i / total));
+-            setStatus(`${i}/${total}...`);
+-          }
+-        } catch { errores++; }
++      try {
++        for (let inicio = 0; inicio < total; inicio += batchSize) {
++          const lote = productos.slice(inicio, inicio + batchSize);
++          setStatus(`Importando ${Math.min(inicio + lote.length, total)}/${total}...`);
++          const response = await ejecutarConReintento(() => productosApi.importBatch(
++            lote.map((producto) => ({ ...producto, comentarios: '' })),
++          ));
++          nuevos += response.data.nuevos;
++          actualizados += response.data.actualizados;
++          sinCambios += response.data.sinCambios;
++          errores += response.data.errores;
++          setProgress(0.3 + (0.65 * Math.min(inicio + lote.length, total) / total));
++        }
++      } catch (batchError) {
++        const status = (batchError as { status?: number })?.status;
++        // Las versiones antiguas del backend no tienen /importar-lote.
++        // En ese caso se usa automáticamente el método compatible.
++        if (status !== 404 && status !== 405) throw batchError;
++        setStatus('Usando modo compatible...');
++        const resultadoCompatible = await importarConApiAnterior(productos);
++        nuevos = resultadoCompatible.nuevos;
++        actualizados = resultadoCompatible.actualizados;
++        sinCambios = resultadoCompatible.sinCambios;
++        errores = resultadoCompatible.errores;
+       }
+ 
+-      // Invalidar cache de smartSearch y volver a inicializar
++      // La importación ya terminó. Si la actualización del buscador falla, no
++      // debe convertir una importación exitosa en un error para el usuario.
+       smartSearch.invalidarCache();
+-      await smartSearch.inicializar(true);
++      try {
++        await smartSearch.inicializar(true);
++      } catch (cacheError) {
++        console.warn('No se pudo refrescar el buscador inmediatamente:', cacheError);
++      }
+ 
+       setProgress(1);
+       setImportResults({ nuevos, actualizados, sinCambios, errores });
+-      Alert.alert('Listo', `Nuevos: ${nuevos}\nActualizados: ${actualizados}\nSin cambios: ${sinCambios}`);
++      Alert.alert(
++        'Importación completada',
++        `Nuevos: ${nuevos}\nActualizados: ${actualizados}\nSin cambios: ${sinCambios}\nErrores: ${errores}`,
++      );
+       
+     } catch (error: any) {
+       console.error('Error importar:', error);
+@@ -442,13 +527,33 @@ export default function ImportExportScreen() {
+     }
+   };
+ 
+-  const parseCSVLine = (line: string): string[] => {
++  const parseNumber = (value: unknown): number => {
++    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
++    let text = String(value ?? '').trim().replace(/[$€£\s]/g, '');
++    if (!text) return 0;
++
++    // Soporta 1.234,56 y 1,234.56, además de números simples.
++    const lastComma = text.lastIndexOf(',');
++    const lastDot = text.lastIndexOf('.');
++    if (lastComma >= 0 && lastDot >= 0) {
++      text = lastComma > lastDot
++        ? text.replace(/\./g, '').replace(',', '.')
++        : text.replace(/,/g, '');
++    } else if (lastComma >= 0) {
++      const decimals = text.length - lastComma - 1;
++      text = decimals === 3 ? text.replace(/,/g, '') : text.replace(',', '.');
++    }
++    const parsed = Number(text);
++    return Number.isFinite(parsed) ? parsed : 0;
++  };
++
++  const parseCSVLine = (line: string, delimiter = ','): string[] => {
+     const r: string[] = [];
+     let c = '', q = false;
+     for (let i = 0; i < line.length; i++) {
+       const ch = line[i];
+       if (ch === '"') { q = !q; }
+-      else if (ch === ',' && !q) { r.push(c.trim()); c = ''; }
++      else if (ch === delimiter && !q) { r.push(c.trim()); c = ''; }
+       else if (ch !== '\r') { c += ch; }
+     }
+     r.push(c.trim());
+diff --git a/frontend/eas.json b/frontend/eas.json
+index 098e6d1..d0f09ed 100644
+--- a/frontend/eas.json
++++ b/frontend/eas.json
+@@ -9,6 +9,9 @@
+       "distribution": "internal",
+       "ios": {
+         "resourceClass": "m-medium"
++      },
++      "env": {
++        "EXPO_PUBLIC_BACKEND_URL": "https://npm-install-g-eas-cli.onrender.com"
+       }
+     },
+     "preview": {
+@@ -18,6 +21,9 @@
+       },
+       "ios": {
+         "resourceClass": "m-medium"
++      },
++      "env": {
++        "EXPO_PUBLIC_BACKEND_URL": "https://npm-install-g-eas-cli.onrender.com"
+       }
+     },
+     "production": {
+@@ -27,20 +33,13 @@
+       },
+       "ios": {
+         "resourceClass": "m-medium"
++      },
++      "env": {
++        "EXPO_PUBLIC_BACKEND_URL": "https://npm-install-g-eas-cli.onrender.com"
+       }
+     }
+   },
+   "submit": {
+-    "production": {
+-      "android": {
+-        "serviceAccountKeyPath": "./google-service-account.json",
+-        "track": "internal"
+-      },
+-      "ios": {
+-        "appleId": "tu-email@example.com",
+-        "ascAppId": "tu-app-id",
+-        "appleTeamId": "tu-team-id"
+-      }
+-    }
++    "production": {}
+   }
+ }
+diff --git a/frontend/metro.config.js b/frontend/metro.config.js
+index 6c170ba..85ec3d4 100644
+--- a/frontend/metro.config.js
++++ b/frontend/metro.config.js
+@@ -11,16 +11,8 @@ config.cacheStores = [
+   new FileStore({ root: path.join(root, 'cache') }),
+ ];
+ 
+-// Disable file watching to avoid ENOSPC errors
++// El proyecto no usa carpetas externas al frontend.
+ config.watchFolders = [];
+-config.watcher = {
+-  watchman: {
+-    enabled: false,
+-  },
+-  healthCheck: {
+-    enabled: false,
+-  },
+-};
+ 
+ // Reduce the number of workers to decrease resource usage
+ config.maxWorkers = 2;
+diff --git a/frontend/services/api.ts b/frontend/services/api.ts
+index d16a768..068ca34 100644
+--- a/frontend/services/api.ts
++++ b/frontend/services/api.ts
+@@ -1,64 +1,141 @@
+-import axios from 'axios';
+-import { Producto, Flujo, Calculo, Cotizacion, Cliente, MatchProductoResult, StatsSistema } from '../types/types';
++import axios, { AxiosError } from 'axios';
++import {
++  Producto,
++  Flujo,
++  Calculo,
++  Cotizacion,
++  Cliente,
++  MatchProductoResult,
++  StatsSistema,
++} from '../types/types';
+ 
+-// CORREGIDO: Sin fallback hardcodeado
+-// URL del backend con fallback seguro para Expo CLI y producción
+-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://npm-install-g-eas-cli.onrender.com';
++const configuredUrl = process.env.EXPO_PUBLIC_BACKEND_URL?.trim();
++export const BACKEND_URL = (configuredUrl || 'https://npm-install-g-eas-cli.onrender.com').replace(/\/$/, '');
+ 
++/**
++ * Render Free puede tardar cerca de un minuto en despertar. Un límite de 90 s
++ * evita el falso "Network Error" durante el primer acceso.
++ */
+ const api = axios.create({
+   baseURL: `${BACKEND_URL}/api`,
+-  timeout: 30000,
++  timeout: 90000,
+   headers: {
+     'Content-Type': 'application/json',
++    Accept: 'application/json',
+   },
+ });
+ 
++function detailFromResponse(data: unknown): string | undefined {
++  if (!data || typeof data !== 'object') return undefined;
++  const detail = (data as { detail?: unknown }).detail;
++  if (typeof detail === 'string') return detail;
++  if (Array.isArray(detail)) {
++    return detail
++      .map((item) => (typeof item === 'object' && item && 'msg' in item ? String(item.msg) : String(item)))
++      .join('\n');
++  }
++  return undefined;
++}
++
++export function getApiErrorMessage(error: unknown): string {
++  if (!(error instanceof AxiosError) && error instanceof Error) return error.message;
++  if (!axios.isAxiosError(error)) return 'Ocurrió un error inesperado';
++
++  const responseDetail = detailFromResponse(error.response?.data);
++  if (responseDetail) return responseDetail;
++
++  if (error.code === 'ECONNABORTED') {
++    return 'El servidor tardó demasiado en responder. Intenta nuevamente en un momento.';
++  }
++  if (!error.response) {
++    return 'No se pudo conectar con el servidor. Comprueba Internet e intenta nuevamente.';
++  }
++  if (error.response.status === 503) {
++    return 'El servidor está activo, pero la base de datos no está disponible.';
++  }
++  if (error.response.status >= 500) {
++    return 'El servidor presentó un error interno. Intenta nuevamente o revisa Render.';
++  }
++  if (error.response.status === 404) return 'No se encontró el recurso solicitado.';
++  return `La solicitud falló (${error.response.status}).`;
++}
++
++api.interceptors.response.use(
++  (response) => response,
++  (error: unknown) => {
++    const normalized = new Error(getApiErrorMessage(error)) as Error & { status?: number };
++    if (axios.isAxiosError(error)) normalized.status = error.response?.status;
++    return Promise.reject(normalized);
++  },
++);
++
++export interface ResultadoImportacion {
++  nuevos: number;
++  actualizados: number;
++  sinCambios: number;
++  errores: number;
++  duplicadosOmitidos?: number;
++  procesados?: number;
++}
++
++export interface ProductoParaImportar {
++  nombre: string;
++  costo: number;
++  precio_venta: number;
++  comentarios?: string;
++}
++
+ // Productos
+ export const productosApi = {
+   getAll: (categoria?: string) => api.get<Producto[]>('/productos', { params: { categoria } }),
+-  search: (query: string) => api.get<Producto[]>(`/productos/buscar?q=${query}`),
+-  getById: (id: string) => api.get<Producto>(`/productos/${id}`),
++  search: (query: string) => api.get<Producto[]>('/productos/buscar', { params: { q: query } }),
++  getById: (id: string) => api.get<Producto>(`/productos/${encodeURIComponent(id)}`),
+   create: (data: Omit<Producto, '_id'>) => api.post<Producto>('/productos', data),
+-  update: (id: string, data: Partial<Producto>) => api.put(`/productos/${id}`, data),
+-  delete: (id: string) => api.delete(`/productos/${id}`),
++  update: (id: string, data: Partial<Producto>) => api.put(`/productos/${encodeURIComponent(id)}`, data),
++  delete: (id: string) => api.delete(`/productos/${encodeURIComponent(id)}`),
+   deleteAll: () => api.delete('/productos'),
+   deleteMultiple: (ids: string[]) => api.post('/productos/eliminar-multiples', { ids }),
++  importBatch: (productos: ProductoParaImportar[]) =>
++    api.post<ResultadoImportacion>('/productos/importar-lote', { productos }, { timeout: 120000 }),
+ };
+ 
+ // Flujos
+ export const flujosApi = {
+   getAll: () => api.get<Flujo[]>('/flujos'),
+-  getById: (id: string) => api.get<Flujo>(`/flujos/${id}`),
++  getById: (id: string) => api.get<Flujo>(`/flujos/${encodeURIComponent(id)}`),
+   create: (data: Omit<Flujo, '_id'>) => api.post<Flujo>('/flujos', data),
+-  update: (id: string, data: Partial<Flujo>) => api.put(`/flujos/${id}`, data),
+-  delete: (id: string) => api.delete(`/flujos/${id}`),
++  update: (id: string, data: Partial<Flujo>) => api.put(`/flujos/${encodeURIComponent(id)}`, data),
++  delete: (id: string) => api.delete(`/flujos/${encodeURIComponent(id)}`),
+ };
+ 
+ // Cálculos
+ export const calculosApi = {
+-  getAll: (params?: { nombre?: string; fecha_desde?: string; fecha_hasta?: string }) => 
++  getAll: (params?: { nombre?: string; fecha_desde?: string; fecha_hasta?: string }) =>
+     api.get<Calculo[]>('/calculos', { params }),
+-  getById: (id: string) => api.get<Calculo>(`/calculos/${id}`),
++  getById: (id: string) => api.get<Calculo>(`/calculos/${encodeURIComponent(id)}`),
+   create: (data: Omit<Calculo, '_id'>) => api.post<Calculo>('/calculos', data),
+-  delete: (id: string) => api.delete(`/calculos/${id}`),
++  delete: (id: string) => api.delete(`/calculos/${encodeURIComponent(id)}`),
+ };
+ 
+ // Cotizaciones
+ export const cotizacionesApi = {
+   getAll: () => api.get<Cotizacion[]>('/cotizaciones'),
+-  getById: (id: string) => api.get<Cotizacion>(`/cotizaciones/${id}`),
++  getById: (id: string) => api.get<Cotizacion>(`/cotizaciones/${encodeURIComponent(id)}`),
+   create: (data: Omit<Cotizacion, '_id'>) => api.post<Cotizacion>('/cotizaciones', data),
+-  update: (id: string, data: Partial<Cotizacion>) => api.put(`/cotizaciones/${id}`, data),
+-  delete: (id: string) => api.delete(`/cotizaciones/${id}`),
+-  getHtmlUrl: (id: string) => `${BACKEND_URL}/api/cotizaciones/${id}/html`,
++  update: (id: string, data: Partial<Cotizacion>) => api.put(`/cotizaciones/${encodeURIComponent(id)}`, data),
++  delete: (id: string) => api.delete(`/cotizaciones/${encodeURIComponent(id)}`),
++  getHtmlUrl: (id: string) => `${BACKEND_URL}/api/cotizaciones/${encodeURIComponent(id)}/html`,
++};
++
++// Estado del servidor y estadísticas
++export const healthApi = {
++  get: () => api.get<{ status: string; database: string; mongodb: string }>('/health'),
+ };
+ 
+-// Estadísticas del sistema
+ export const statsApi = {
+   get: () => api.get<StatsSistema>('/stats'),
+ };
+ 
+-// Calcular precio
+ export const calcularPrecio = (data: {
+   costo_base: number;
+   flujo_id: string;
+@@ -66,11 +143,9 @@ export const calcularPrecio = (data: {
+   clientes: Array<{ nombre: string; porcentaje_ganancia: number; comentario?: string }>;
+ }) => api.post<{ costo_base: number; precio_calculado: number; resultados: Cliente[] }>('/calcular', data);
+ 
+-// Match de productos
+-export const matchProductos = (nombres: string[]) => 
++export const matchProductos = (nombres: string[]) =>
+   api.post<MatchProductoResult[]>('/match-productos', { nombres });
+ 
+-// Aprendizaje de IA
+ export const aprendizajesApi = {
+   guardar: (data: {
+     nombre_original: string;
+@@ -87,10 +162,9 @@ export const aprendizajesApi = {
+     nombre_producto: string;
+     veces_corregido: number;
+   }>>('/aprendizajes'),
+-  delete: (id: string) => api.delete(`/aprendizajes/${id}`),
++  delete: (id: string) => api.delete(`/aprendizajes/${encodeURIComponent(id)}`),
+ };
+ 
+-// Alias legacy para compatibilidad con LectorTexto
+ export const guardarAprendizaje = aprendizajesApi.guardar;
+ 
+ export default api;
+diff --git a/render.yaml b/render.yaml
+index 5d910ae..45ce4fc 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -1,13 +1,18 @@
+ services:
+   - type: web
+     name: npm-install--g-eas-cli
+-    env: python
++    runtime: python
+     region: oregon
+     plan: free
+     buildCommand: pip install -r requirements.txt
+     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
++    healthCheckPath: /api/health
+     envVars:
+       - key: PYTHON_VERSION
+-        value: 3.11.0
++        value: 3.12.11
++      - key: MONGO_URL
++        sync: false
+       - key: DB_NAME
+         value: calculadora_precios
++      - key: MONGO_TIMEOUT_MS
++        value: "5000"
+diff --git a/requirements.txt b/requirements.txt
+index f49f5ea..05f7e56 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,7 +1,7 @@
+-fastapi>=0.110.0,<1.0.0
+-uvicorn[standard]>=0.25.0,<1.0.0
+-pydantic>=2.6.0,<3.0.0
+-pymongo[srv]>=4.5.0,<5.0.0
+-python-dotenv>=1.0.0,<2.0.0
+-python-multipart>=0.0.9,<1.0.0
+-requests>=2.31.0,<3.0.0
++fastapi==0.141.1
++uvicorn[standard]==0.52.3
++pydantic==2.13.4
++pymongo==4.17.0
++python-dotenv==1.2.2
++python-multipart==0.0.32
++requests==2.34.2
