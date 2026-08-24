@@ -1,12 +1,13 @@
 import axios from 'axios';
 import { Producto, Flujo, Calculo, Cotizacion, Cliente } from '../types/types';
 
-// CORREGIDO: Sin fallback hardcodeado
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-
-if (!BACKEND_URL) {
-  throw new Error('EXPO_PUBLIC_BACKEND_URL no está configurado');
-}
+// La variable se puede sobrescribir en frontend/.env o en EAS.
+// El fallback evita que la app se cierre al abrirse cuando se instala el APK
+// sin variables de entorno configuradas.
+const BACKEND_URL = (
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  'https://npm-install-g-eas-cli.onrender.com'
+).replace(/\/$/, '');
 
 const api = axios.create({
   baseURL: `${BACKEND_URL}/api`,
@@ -19,7 +20,7 @@ const api = axios.create({
 // Productos
 export const productosApi = {
   getAll: () => api.get<Producto[]>('/productos'),
-  search: (query: string) => api.get<Producto[]>(`/productos/buscar?q=${query}`),
+  search: (query: string) => api.get<Producto[]>(`/productos/buscar?q=${encodeURIComponent(query)}`),
   getById: (id: string) => api.get<Producto>(`/productos/${id}`),
   create: (data: Omit<Producto, '_id'>) => api.post<Producto>('/productos', data),
   update: (id: string, data: Partial<Producto>) => api.put(`/productos/${id}`, data),
